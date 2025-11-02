@@ -1,0 +1,1 @@
+Notes for fullstack open :D
