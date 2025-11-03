@@ -1,1 +1,1 @@
-Notes for fullstack open :D
+Notes for fullstack open :)
