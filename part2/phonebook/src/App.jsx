@@ -1,37 +1,84 @@
 import { useState, useEffect } from 'react'
-import axios from 'axios'
 import Filter from './components/Filter'
 import PersonForm from './components/PersonForm'
 import Persons from './components/Persons'
+import personsService from './services/persons'
+import Notification from './components/Notification'
+import './index.css'
 
 const App = () => {
-  const [persons, setPersons] = useState([
-    { name: 'Arto Hellas', number: '040-123456', id: 1 },
-  ]) 
+  const [persons, setPersons] = useState([]) 
 
   const [newName, setNewName] = useState('')
   const [newNumber, setNewNumber] = useState('')
   const [newFilter, setFilter] = useState('')
   const [showFilter, setShowFilter] = useState(true)
-  const [notes, setNotes] = useState([])
+  const [newNotification, setNotification] = useState(null)
 
-  const hook = () => {
-    console.log('effect')
-    axios
-      .get('http://localhost:3001/persons')
+  useEffect(() => {
+    personsService
+      .getAll()
       .then(response => {
-        console.log(response)
+        setPersons(response.data)
       })
-  }
+  }, [])
 
-  useEffect(hook, [])
+  const deleteFunc = (id, name) => {
+    if (window.confirm(`Delete ${name}?`)) {
+      personsService
+        .deletePerson(id)
+        .then(() => {
+          setPersons(persons.filter(person => person.id !== id))
+        })
+        setNotification(`${name} has been deleted`)
+        setTimeout(() => {
+          setNotification(null)
+        }, 4000)
+      }
+    } 
 
   const addPerson = (event) => {
     event.preventDefault()
     if (persons.some(person => person.name === newName)) {
-      alert(`${newName} is already added to the phonebook`)
+      const existingPerson = persons.find(p => p.name === newName)
+      if (window.confirm(`${newName} is already added to the phonebook, replace the old number with a new one?`)) {
+        const updatedPerson = {
+          ...existingPerson,
+          number: newNumber
+        }
+        personsService
+          .update(existingPerson.id, updatedPerson)
+          .then(response => {
+            setPersons(persons.map(person => (
+              person.id !== existingPerson.id ? person : response.data
+            )))
+            setNotification(`${updatedPerson.name}'s number has been changed`)
+            setTimeout(() => {
+              setNotification(null)
+            }, 4000)
+          })
+          .catch(error => {
+            setNotification(`Information of ${updatedPerson.name} has already been removed from the server`)
+            setTimeout(() => {
+              setNotification(null)
+            }, 4000)
+            setPersons(persons.filter(person => person.id !== updatedPerson.id))
+          })
+      }
     } else {
-      setPersons(persons.concat({name:newName, number:newNumber}))
+      const person = {
+        name: newName,
+        number: newNumber
+      }
+      personsService
+        .create(person)
+        .then(response => {
+          setPersons(persons.concat(response.data))
+        }) 
+      setNotification(`Added ${person.name}`)
+      setTimeout(() => {
+        setNotification(null)
+      }, 4000)
     }
     setNewName('')
     setNewNumber('')
@@ -59,11 +106,12 @@ const App = () => {
   return (
     <div>
       <h2>Phonebook</h2>
-      filter shown with <Filter value={newFilter} onChange={handleFilterChange}/> 
+      <Notification message={newNotification}/>
+      <Filter value={newFilter} onChange={handleFilterChange}/> 
       <h2>add a new</h2>
       <PersonForm onSubmit={addPerson} name={newName} number={newNumber} nameChange={handleNameChange} numberChange={handleNumberChange}/>
       <h2>Numbers</h2>
-      <Persons persons={showFilteredPeople}/>
+      <Persons persons={showFilteredPeople} onDelete={deleteFunc}/>
     </div>
   )
 }
