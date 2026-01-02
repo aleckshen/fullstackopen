@@ -164,7 +164,7 @@ In order to enable legitimate cross-origin requests W3C came up with a mechanism
 
 The problem that we encountered is that the javascript code of an application that runs in the browser can only communicate with a server in the same origin. Because our backend server is in localhost port 3001, while our frontend is in localhost port 5173, they do not have the same origin.
 
-We cab allow requests from other origins by using node's cors middleware, we will install this in the backend repository using the command:
+We can allow requests from other origins by using node's cors middleware, we will install this in the backend repository using the command:
 ```
 npm install cors
 ```
