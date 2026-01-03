@@ -169,3 +169,99 @@ We can allow requests from other origins by using node's cors middleware, we wil
 npm install cors
 ```
 
+# Application to the internet
+
+Now that the whole stack is ready we can move out application to the internet. There are many services that can be used to host an app on the internet. In fullstack open we will use developer-friendly services like Paas (Platform as a service) which takes care of installing the execution environment (eg. Node.js) and could also provide various services such as databases.
+
+In this part of full stack open we have two options, we can either use fly.io or render. I decided to use render as it was free and fly.io costed money. For both of the services we need to change the definition of the port that our application uses at the bottom of the `index.js` file in the backend like so:
+```javascript
+const PORT = process.env.PORT || 3001
+app.listen(PORT, () => {
+    console.log(`Server running on port ${PORT}`)
+})
+```
+
+Now we are using the port defined in the environment variable `PORT` or port 3001 if the environment variable `PORT` is undefined.
+
+To deploy using render all u have to do is sign into render using github, once your signed in you can click and create a new web service. In the settings of the web service you will first provide a public link to your github repository, then you will provide the necessary commands to run your build and where the location you want to run it from. For example in our case we want render to run our commands from:
+```
+part3/notes/backend
+```
+For our build command we want:
+```
+npm install
+```
+For our start command we want:
+```
+npm run dev
+```
+
+After defining these specifications in the setting our backend will be successfully deployed.
+
+# Serving static files from the backend
+
+One option for deploying the frontend is to copy the production build in the frontend to the backend. First start by running `npm run build`, this creates a folder named `dist` which is the frontend production build, we will then copy this folder into the backend folder.
+
+TO make express show static content, the page index.html and the javascript etc., it fetches, we need a built-in middleware from express called `static`.
+
+We will add the following amidst the declarations of middleware:
+```
+app.use(express.static('dist'))
+```
+
+Whenever express gets an HTTP GET request it will first check if the dist directory contains a file corresponding to the request's address. If a correct file is found, express will return it.
+
+Now HTTP GET requests to the address `www.serveraddress.com/index.html` or `www.serveraddress.com` will show the react frontend. GET requests to the address `www.serveraddress.com/api/notes` will be handled by the backend code.
+
+Because of out situation, both the frontend and backend are at the same address, we can declare `baseUrl` as a relative URL. This means we can leave out the part declaring the server
+```javascript
+const baseUrl = '/api/notes'
+```
+
+After creating this new change, we have to create a new production build of the frontend and copy it to the root of the backend directory, once it is deployed the frontend can be accessed at the root address of the hostname and the backend can be accessed via the root address `/api/notes`.
+
+# Streamlining deployment of frontend
+
+We can create a script to deploy out frontend easily. The script will delete the current dist folder in the backend, change directory to the front end and create a new production build then copy it over to the root of the backend directory.
+```
+  "scripts": {
+    "start": "node index.js",
+    "dev": "node --watch index.js",
+    "test": "echo \"Error: no test specified\" && exit 1",
+     "build:ui": "rm -rf dist && cd ../frontend && npm run build && cp -r dist ../backend",
+    "deploy:full": "npm run build:ui && cd .. && git add . && git commit -m uibuild && git push"
+  },
+```
+
+# Proxy
+
+Changes on the frontend have caused it to no longer work in development mode, as the connection to the backend does not work. This is due to changing the backend address to a relative URL:
+```javascript
+const baseUrl = '/api/notes'
+```
+
+Because in development mode the frontend is at address localhost:5173, the requests to the backend go to the wrong address localhost:5173/api/notes. The backend is at localhost:3001. If the project is created using Vite, we can easily solve this with the following addition to the vite.config.js file of the frontend directory:
+```javascript
+import { defineConfig } from 'vite'
+import react from '@vitejs/plugin-react'
+
+// https://vite.dev/config/
+export default defineConfig({
+  plugins: [react()],
+  server: {
+    proxy:  {
+      '/api': {
+        target: 'https://fullstackopen-2urr.onrender.com/',
+        changeOrigin: true,
+      }
+    }
+  }
+})
+```
+
+After restarting, the react development environment will act as proxy. If the react code makes an HTTP request to a path starting with `http://localhost5713/api`, the request will be forwarded to the server at the backend. Request to other paths will be handled normally by the development server.
+
+Now the frontend works correctly, it functions both in development mode and in production mode together with the server. Since from the frontend's perspective all requests are made to `http://localhost:5173`, which is the single origin, there is no longer a need for the backend cors middleware. Therefore, we can remove references to the cors library from the backend's index.js file and remove cors form the projects dependencies:
+```
+npm remove cors
+```
