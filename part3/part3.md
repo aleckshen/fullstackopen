@@ -265,3 +265,180 @@ Now the frontend works correctly, it functions both in development mode and in p
 ```
 npm remove cors
 ```
+
+# MongoDB
+
+To store data indefinitely we need a database. In this part we will use mongoDB which is a document database. Document databases are usually categorizted under the NoSQL umbrella term.
+
+## Collections & documents
+
+MongoDB stores data record as documents (specifically BSON documents) which are gathered together in collections. A database stores one or more collections of documents. There are three ways to manage databases and collections, we can manage them from the Atlas cluster from the Atlas UI, `mongosh` or mongoDB compass. MonogDB stores documents in collections, collections are analogous to tables in relational databases. By default a collection does not require its documents to have the same schema, the documents in a single collection do not need to have the same set of fields and the data type for a field can differ across documents within a collection. However you can enforce schema validation rules for a collection during update and insert operations. Collections are assigned an immutable UUID. The collection UUID remains the same across all members of a replica set and shards in a sharded cluster.
+
+MongoDB stores data records as BSON documents. BSON is a binary representation of JSON documents, thought it contains more data types than JSON. MongoDB documents are composed of field-and-value pairs and have the following structure:
+```
+{
+    field1: value1,
+    field2: value2,
+    field3: value3,
+}
+```
+The value of a field can be any of the BSON data types, including other documents, arrays and arrays of documents. Field names are strings, documents have some restrictions on field names. For example, the field name `_id` is reserved for use as a primary key, its value must be unique in the collection, is immutable, and may be of any type other than an array or regex. If the `_id` contains subfields, the subfield names cannot begin with a `($)` symbol. There are a couple other restrictions that I wont list here.
+
+## Mongoose
+
+Mongoose is a object document mapper (ODM) which is used to help qeury the mongoDB database with clear syntax. It servers as a bride between mongoDB's flexbile, schemaless noSQL structure. We can install mongoose with the following command:
+```
+npm install mongoose
+```
+The connection to the database is established with the following command:
+```
+mongoose.connect(url, { family: 4 })
+```
+The method takes the database URL as the first arg and an object that defines the required settings as the second arg. MongoDB Atlas supports only IPv4 adresses, so with the object `{ family: 4}` we specify that the connection should alwasy use IPv4.
+
+The practice application assumes that it will be passed the password from the credentials we created in MongoDB Atlas, as a command line parameter. We can access the command line parameter like this:
+```
+const password = process.argv[2]`
+```
+
+# Schema
+
+After establishing the connection to the database, we define the schema for a note and the matching model:
+```javascript
+const noteSchema = new mongoose.Schema({
+  content: String,
+  important: Boolean,
+})
+
+const Note = mongoose.model('Note', noteSchema)
+```
+First we define the schema of a note that is stored in the `noteSchema` variable. The schema tells mongoose how the note objects are to be stored in the database.
+
+Document databases like MongoDB are shcemaless, meaning that the database itself does not care about the structure of the data that is stored in the database, it is possible to store documents with completely different fields in the same collection. The idea behind mongoose is that the data stored in the database is given a schema at the level of the application that defines the shape of the documents stored in any given collection.
+
+# Creating and saving objects
+
+The application creates a new note object with the help of the `Note` model:
+```javascript
+const note = new Note({
+  content: 'HTML is Easy',
+  important: false,
+})
+```
+Models are constuctor functions that create new javascript objects based on the provided parameters. Since the objects are created with the models constructor function, they have all the properties of the model, which include methods for saving the object to the database.
+
+Saving the object to the database happens with the `save` method, which can be provided with an event handler with the `then` method:
+```javascript
+note.save().then(result => {
+  console.log('note saved!')
+  mongoose.connection.close()
+})
+```
+
+# Fetching objects from the database
+
+When the following code is executed, the program prints all the notes stored in the database:
+```javascript
+Note.find({}).then(result => {
+    result.forEach(note => {
+        console.log(note)
+    })
+    mongoose.connection.close()
+})
+```
+The objects are retrieved from the database with the find method of the `Note` model. The parameter of the method us ab iobject expressing search conditions. Since the parameter is an empty `{}` object, we get all of the notes stored in the `notes` collection.
+
+We could also restrict our search to inlcude important notes like this:
+```javascript
+Note.find({ important: true }).then(result => {
+// ...
+})
+```
+
+# Error handling
+
+If we try to visit the URL of a resource with an id that does not exist for example `http://localhost:3001/api/persons/1238127`, where `1238127` is not an id stored in the database, then the response will be null and the server will stop running.
+
+We can change this behaviour such that if a note with the given id does not exist, then the server will respond to the request with the HTTP status code 404 not found. In addition we can implement a simple `catch` block to handle cases where the promise returned by the `findById` method is rejected:
+```javascript
+app.get('/api/notes/:id', (request, response) => {
+  Note.findById(request.params.id)
+    .then(note => {
+
+      if (note) {
+        response.json(note)
+      } else {
+        response.status(404).end()
+      }
+    })
+
+    .catch(error => {
+      console.log(error)
+      response.status(500).end()
+    })
+})
+```
+If no matching object is found in the database, the value of the `note` will be null and the `else` block is executed. This results in a response with the status code 404 not found. If a promise returned by the `findById` method is rejected, the response will have the status code 500 internal server error.
+
+# Moving error handling into middlware
+
+Writting code for error handling among the rest of our code can be reasonable at times, but there are cases where it is better to implement all error handling in a single place. This can be useful if we want to report data to errors to an external error-tracking system like later on.
+
+We can change the handler for errros so that it passes the error forward with the `next` function. The next function is passed to the hanlder as the third param.
+```javascript
+app.get('/api/notes/:id', (request, response, next) => {
+    Note.findById(request.params.id)
+        .then(note => {
+            if (note) {
+                response.json(note)
+            } else {
+                response.status(404).end()
+            }
+        })
+        .catch(error => next(error))
+})
+
+// this has to be the last loaded middleware, also all the routes should be registered before this
+app.use(errorHandler)
+```
+The error passed foward is given to the `next` function as a parameter. If `next` was called without an argument , then the execution would simply move onto the next route or middleware. If the `next` function is called with an argument, then the execution will continue to the error hnadler middleware.
+
+# Other operations
+
+## Delete operation
+
+To delete a resource from our database we will use the `findByIdAndDelete` method:
+```javascript
+app.delete('/api/notes/:id', (request, response, next) => {
+  Note.findByIdAndDelete(request.params.id)
+    .then(result => {
+      response.status(204).end()
+    })
+    .catch(error => next(error))
+})
+```
+In both of the successful cases of deleting a resource, the backend responds with the status code 204 no content. The two different cases are deleting a note that exists, and deleting a note that does not exist in the database. The `reuslt` callback parameter could be used for checking if a resource was actually deleted, and we could use that information for returning different status codes for the two cases if we deem it necessary. Any exception that occurs is passed onto the error handler.
+
+## Update operation
+
+We can also implement the functionality to update a single resource, allowing different changes to the resource to be made. We can update notes in the note exercises as follows:
+```javascript
+app.put('/api/notes/:id', (request, response, next) => {
+  const { content, important } = request.body
+
+  Note.findById(request.params.id)
+    .then(note => {
+      if (!note) {
+        return response.status(404).end()
+      }
+
+      note.content = content
+      note.important = important
+
+      return note.save().then((updatedNote) => {
+        response.json(updatedNote)
+      })
+    })
+    .catch(error => next(error))
+})
+```
