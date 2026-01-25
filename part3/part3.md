@@ -442,3 +442,77 @@ app.put('/api/notes/:id', (request, response, next) => {
     .catch(error => next(error))
 })
 ```
+
+# Validation
+
+There are usually constraints that we want to apply to the data that is stored in our applications database. For example out application should not accept empty content resources. Currently we handle it by checking the request bodys content is empty and if it is then we response with the HTTP status code 400.
+
+A smarter way of validating the format of the data before it is stored in the database is to use the validation functionality available in mongoose. We can define specific validation rules for each field in the schema:
+```javascript
+const noteSchema = new mongoose.Schema({
+
+  content: {
+    type: String,
+    minLength: 5,
+    required: true
+  },
+  important: Boolean
+})
+```
+The `minLength` and `reuired` validators are built-in and provided by mongoose, but we can also create new validotrs with vustom validators. Now if we try to store objects in the database that breaks on of the constraints, we will get a validation error, we can change how our POST method handles storing data in the database. On save of the resource we can have a catch block that passes the error to the error handler middleware. Inside the error handler middleware we can catch the `ValidationError` error.
+
+# Deploying the database backend to production
+
+The enviroment variables defined in the `.env` files will only be used when the backend is not in production mode. For production, we have to set the database URL in the service that is hosting our app. In render we can do this by creating a environment variable and adding it to the project, we also need to make sure that we whitelist the apps IP adress in mongoDB atlas. If we don't then mongoDB will refuse the connection.
+
+# Lint
+
+Lint or a linter is any tool that detects and flags errors in programming languages, including stylistic errors. Lint-like tools generally perform static analysis of source code.
+
+In the javascript universe, the current leading tool for static analysis (aka "linting") is ESlint. We can add ESLint as a development dependency for the backend. Development dependencies are tools that are only needed during the development of the application. For example, tools related to testing are such dependencies. When the application is in production mode, development dependencies are not needed.
+
+We can install ESLint as a development dependency for the backend with the following command:
+```
+npm install eslint @eslint/js --save-dev
+```
+After this we can initialize a defualt ESLint configuration with the command:
+```
+npx eslint --init
+```
+
+# Running the linter
+
+Inspecting and validating a file like `index.js` can be done with the following command:
+```
+npx eslint index.js
+```
+
+It is recommended to create a seperate `npm script` for linting:
+```
+{
+  // ...
+  "scripts": {
+    "start": "node index.js",
+    "dev": "node --watch index.js",
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "lint": "eslint ."
+    // ...
+  },
+  // ...
+}
+```
+
+Files in the `dist` directory also get checked when the command is run. We do not want this to happen, we can accomplish this by adding an object with the ignores property that specifies an array of directories and files we want to ignore.
+```
+// ...
+export default [
+  js.configs.recommended,
+  {
+    files: ['**/*.js'],
+    // ...
+  },
+  { 
+    ignores: ['dist/**'], 
+  },
+]
+```
