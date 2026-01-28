@@ -15,7 +15,7 @@ beforeEach(async () => {
 
 test('correct amount of blogs in database', async () => {
   const blogs = await api.get('/api/blogs')
-  assert.strictEqual(blogs.length, helper.initialBlogs.legnth)
+  assert.strictEqual(blogs.body.length, helper.initialBlogs.length)
 })
 
 test('unique identifier property is named id', async () => {
@@ -72,6 +72,28 @@ test('if title or url props are missing then backend responds 400', async () => 
     .post('/api/blogs')
     .send(blog)
     .expect(400)
+})
+
+test('deleting a single blog resource', async () => {
+  const blogsAtStart = await helper.blogsInDb()
+  const blogToDelete = blogsAtStart[0]
+
+  await api
+    .delete(`/api/blogs/${blogToDelete.id}`)
+    .expect(204)
+})
+
+test('updating a blog resource', async () => {
+  const blogsAtStart = await helper.blogsInDb()
+  const blogToUpdate = blogsAtStart[0]
+
+  const updatedBlog = { ...blogToUpdate, likes: blogToUpdate.likes + 1 }
+
+  await api
+    .put(`/api/blogs/${updatedBlog.id}`)
+    .send(updatedBlog)
+    .expect(200)
+    .expect('Content-Type', /application\/json/)
 })
 
 after(async () => {
