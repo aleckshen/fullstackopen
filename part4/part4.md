@@ -180,3 +180,212 @@ main()
 ```
 The code declares that the function assigned to `main` is asynchronous. After this, the code calls the function with `main()`.
 
+# User administration
+
+We want to add user authentication and authorization to our app. Users should be stored in the database and every note should be linked to the user who created it. Deleting and editing resources should only be allowed for the user who created it. We know that there is a one-to-many relationship between the user (User) and notes (Note). If we were working with a relational database then the implementation would be pretty straight forward. However we are working with document databases which makes things different.
+
+The existing solution saves every note in the notes collection in the database. If we do not want to change this exisiting collection, then the natural choice is to save users in their own collection, users for example. Like with all document databases, we can use object IDs in Mongo to reference documents in other collections. This is similar to using foreign keys in relational databases.
+
+# References across collections 
+
+If we were using a relational database the note would contain a reference key to the user who created it. In document databases, we can do the same thing. Lets assume the `users` collection contains two users:
+```javascript
+[
+  {
+    username: 'mluukkai',
+    _id: 123456,
+  },
+  {
+    username: 'hellas',
+    _id: 141414,
+  },
+]
+```
+The notes collection contains three notes that all have a user field that references a user in the users collections:
+```javascript
+[
+  {
+    content: 'HTML is easy',
+    important: false,
+    _id: 221212,
+    user: 123456,
+  },
+  {
+    content: 'The most important operations of HTTP protocol are GET and POST',
+    important: true,
+    _id: 221255,
+    user: 123456,
+  },
+  {
+    content: 'A proper dinosaur codes with Java',
+    important: false,
+    _id: 221244,
+    user: 141414,
+  },
+]
+```
+Document databases do not demand the foreign key to be stored in the note resources, it could also be stored in the users collection, or even both:
+```javascript
+[
+  {
+    username: 'mluukkai',
+    _id: 123456,
+    notes: [221212, 221255],
+  },
+  {
+    username: 'hellas',
+    _id: 141414,
+    notes: [221244],
+  },
+]
+```
+Since users can have many notes, the realted ids are stored in an array in the notes field.
+
+# Mongoose schema for users
+
+In this case, we decide to store the ids of the notes created by the user in the user docuement. We can define the model for representing a user in the `models/user.js` file:
+```javascript
+const mongoose = require('mongoose')
+
+const userSchema = new mongoose.Schema({
+  username: String,
+  name: String,
+  passwordHash: String,
+  notes: [
+    {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Note'
+    }
+  ],
+})
+
+userSchema.set('toJSON', {
+  transform: (document, returnedObject) => {
+    returnedObject.id = returnedObject._id.toString()
+    delete returnedObject._id
+    delete returnedObject.__v
+    // the passwordHash should not be revealed
+    delete returnedObject.passwordHash
+  }
+})
+
+const User = mongoose.model('User', userSchema)
+
+module.exports = User
+```
+The ids of the notes are stored within the user docuemnt as an array of Monogp ids. The definition is as follows:
+```javascript
+{
+  type: mongoose.Schema.Types.ObjectId,
+  ref: 'Note'
+}
+```
+The field type is `ObjectId`, meaning it refers to another document. The ref field specifies the name of the model being referenced. Mongo does not inherently know that this is a field that references notes, the syntax is purely related to and defined by Mongoose. We can expand the schema of the note defined in the `models/note.js` file so that the note contains information about the user who created it:
+```javascript
+const noteSchema = new mongoose.Schema({
+  content: {
+    type: String,
+    required: true,
+    minlength: 5
+  },
+  important: Boolean,
+
+  user: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User'
+  }
+})
+```
+In stark contrast to the conventions of relational databases, references are now stored in both documents: the note references the user who created it, and the user has an array of references to all of the notes created by them.
+
+# Creating users
+
+We can now implement a route for creating new users. Users have a unique username, a name and something called a passwordHash. The password hash is the output of a one-way hash function applied to the users password. It is never wise to store unencrypted plain text passwords in the database. We can install the bycrypt package for generating password hashes:
+```
+npm install bcrypt
+```
+We can define a seperate router for dealing with users in a new `controllers/users.js` file. We can take the router into use in our application in the app.js file, so that it handles requests made to the `/api/users` url:
+```javascript
+// ...
+const notesRouter = require('./controllers/notes')
+const usersRouter = require('./controllers/users')
+
+// ...
+
+app.use('/api/notes', notesRouter)
+app.use('/api/users', usersRouter)
+
+// ...
+```
+The contents of the file, `controllers/users.js` containts the following:
+```javascript
+const saltRounds = 10
+  const passwordHash = await bcrypt.hash(password, saltRounds)
+
+  const user = new User({
+    username,
+    name,
+    passwordHash,
+  })
+
+  const savedUser = await user.save()
+
+  response.status(201).json(savedUser)
+```
+The password sent in the request is not stored in the database, we store the hash of the password that is generated with the `bcrypt.hash` function.
+
+We can then create some test cases that ensure that we can add users to the database and also that a user with the same name cannot be added to the database. Currently the tests will fail as we havent added functionality for handling unique usernames. Mongoose validation do not provide a direct way to check the uniqueness of a field value. However, it is possile to acheive uniqueness by defining uniqueness index for a field. The definition is done as follows:
+```javascript
+username: {
+    type: String,
+    required: true,
+    unique: true // this ensures the uniqueness of username
+  },
+```
+However, we want to be creaful when using the uniqueness index. If there are already documents in the database that violate the uniqueness condition, no index will be created. So when addy a uniqueness index, ensure that the database is in a healthy state. Mongoose validation do not detect the index violation, and instead of `ValidationError` they return an error of type `MonogoServerError`. We therefore need to extend the error handler for that case:
+```javascript
+const errorHandler = (error, request, response, next) => {
+  if (error.name === 'CastError') {
+    return response.status(400).send({ error: 'malformatted id' })
+  } else if (error.name === 'ValidationError') {
+    return response.status(400).json({ error: error.message })
+
+  } else if (error.name === 'MongoServerError' && error.message.includes('E11000 duplicate key error')) {
+    return response.status(400).json({ error: 'expected `username` to be unique' })
+  }
+
+  next(error)
+}
+```
+
+# Populate
+
+We would like our API to work in such a way, that whne an HTTP GET request is made to the `/api/users` route, the user objects would also contain the contents of the users notes and not just their id. In a relation database, this functionality would be implemented with a join query. 
+
+As previously mentioned, document databases do not properly support join queries between collections, but the mongoose libriary can do some of these joins for us. With join queries in mongoose, nothing can guarentee that the state between the collections being joined is consistent, meaning that if we make a query that joins the user and notes collection, the state of the collections may change during the query.
+
+The mongoose join is done with the populate method. We can update the route that returns all users in `controllers/users/js` file:
+```javascript
+usersRouter.get('/', async (request, response) => {
+
+  const users = await User
+    .find({}).populate('notes')
+
+  response.json(users)
+})
+```
+The populate method is chained after the find method making the initial query. The argument given to the populate method defines that the ids referencing note objects in the notes field of the user document will be replaced by the referenced note documents. Mongoose first queries the users collection for the list of users, and then queries the collection corresponding to the model object specified by the ref property in the users schema for data with the given object id.
+
+We can also use the populate method to choose what fields we want to inlude from the documents. For example:
+```javascript
+usersRouter.get('/', async (request, response) => {
+  const users = await User
+    .find({}).populate('notes', { content: 1, important: 1 })
+
+  response.json(users)
+})
+```
+
+# Token authentication
+
+
