@@ -388,4 +388,123 @@ usersRouter.get('/', async (request, response) => {
 
 # Token authentication
 
+Users must be able to log into our application, and when a user is logged in, their user information must automatically be attached to any new notes they create. The following will represent the steps of token-based authentication:
+1. User start by logging in using a login form implemented with react.
+2. This causes react code to send username and the password to the server adress `/api/login` as an HTTP POST request.
+3. If the username and the password are correct, the server generates a token that somehow identifies the logged-in user. The token is signed digitally, making it impossible to falsify.
+4. The backend responds with a status code indicating the operation was successful and returns the token with the response.
+5. The browser saves the token, for example to the state of a react application.
+6. When the user creates a new note (or any action requiring identification), the react code sends the token to the server with the request.
+7. The server uses the token to identify the user.
 
+We will use the `jsonwebtoken` library which will allow us to generate JSON web tokens. The code for the login functionality will go in the file `controllers/login.js`.
+```javascript
+const jwt = require('jsonwebtoken')
+const bcrypt = require('bcrypt')
+const loginRouter = require('express').Router()
+const User = require('../models/user')
+
+loginRouter.post('/', async (request, response) => {
+  const { username, password } = request.body
+
+  const user = await User.findOne({ username })
+  const passwordCorrect = user === null
+    ? false
+    : await bcrypt.compare(password, user.passwordHash)
+
+  if (!(user && passwordCorrect)) {
+    return response.status(401).json({
+      error: 'invalid username or password'
+    })
+  }
+
+  const userForToken = {
+    username: user.username,
+    id: user._id,
+  }
+
+  const token = jwt.sign(userForToken, process.env.SECRET)
+
+  response
+    .status(200)
+    .send({ token, username: user.username, name: user.name })
+})
+
+module.exports = loginRouter
+```
+
+# Limiting creating new notes to logged-in users
+
+We need to ensure that creating new notes is only possilbe if the post request has a valid token attached. The note is then saved to the notes list of the user identified by the token. To send our token from the browser to the server we will use authorization header. The header also tells which authorization scheme is used, this can be necessary if the server offers multiple ways to authenticate. Identifying the scheme tells the server how the attached credentials should be interpreted. The Bearer scheme is suitable for out needs. In practice, this means that if the token is for example the string `eyJhbGciOiJIUzI1NiIsInR5c2VybmFtZSI6Im1sdXVra2FpIiwiaW`, the auth header will have the value:
+```
+Bearer eyJhbGciOiJIUzI1NiIsInR5c2VybmFtZSI6Im1sdXVra2FpIiwiaW
+```
+We now need to change out `controller/notes.js` file and handle posting notes differently.
+```javascript
+const jwt = require('jsonwebtoken')
+
+// ...
+
+const getTokenFrom = request => {
+  const authorization = request.get('authorization')
+  if (authorization && authorization.startsWith('Bearer ')) {
+    return authorization.replace('Bearer ', '')
+  }
+  return null
+}
+
+notesRouter.post('/', async (request, response) => {
+  const body = request.body
+
+  const decodedToken = jwt.verify(getTokenFrom(request), process.env.SECRET)
+  if (!decodedToken.id) {
+    return response.status(401).json({ error: 'token invalid' })
+  }
+  const user = await User.findById(decodedToken.id)
+
+  if (!user) {
+    return response.status(400).json({ error: 'UserId missing or not valid' })
+  }
+
+  const note = new Note({
+    content: body.content,
+    important: body.important || false,
+    user: user._id
+  })
+
+  const savedNote = await note.save()
+  user.notes = user.notes.concat(savedNote._id)
+  await user.save()
+
+  response.status(201).json(savedNote)
+})
+```
+The helper function `getTokenFrom` isolates the token from the auth header. The validity of the token is checked with `jwt.verify`. The method also decodes the token, or returns the object which the token was based on. If the token is missing or it is invalid, the exception `JsonWebTokenError` is raised. We need to extend the error handling middleware to care care of this particular case:
+```javascript
+} else if (error.name ===  'JsonWebTokenError') {
+    return response.status(401).json({ error: 'token invalid' })
+  }
+```
+
+# Problems of token-based authentication
+
+Token authentication is pretty easy to implement, but it contains one problem. Once the API user, ege. a React app gets a token, the API has a blind trust to the token holder. What if the access rights of the token holder should be revoked? There are two solutions to this problem. The easier one is to limit the validity period of a token:
+```javascript
+// token expires in 60*60 seconds, that is, in one hour
+  const token = jwt.sign(
+    userForToken, 
+    process.env.SECRET,
+    { expiresIn: 60*60 }
+  )
+```
+Once the token expires, the client app needs to get a new token. Usually, this happens by forcing the user to re-login to the app. The error handling middleware should be extended to give a proper error in the case of an expired token:
+```javascript
+ } else if (error.name === 'TokenExpiredError') {
+    return response.status(401).json({
+      error: 'token expired'
+    })
+  }
+```
+The shorter the expiration time, the safer the solution is. If the token falls into the wrong hands or user access to the system needs to be revoked, the token is only usable for a limited amount of time. owever a short expiration time is a potential pain point for the user, as it requires them to log in more frequently. The other solutions is to save info about each token to the backend database and to check for each API request if the access rights corresponding to the tokens are still valid. With this scheme, access rights can be revoked at any time. This kind of solution is often called a server-side session.
+
+The negative aspect of server-side session is the increased complexity in the backend and also the effect on performance since the token validity needs to be checked for each API request to the database. Database access is considerably slower compared to checking the validity of the token itself. That is why it is quite common to save the session corresponding to a token to a key-value database such as `Redis`, that is limited in functionality compared to eg. MongoDB or a relational database., but extremely fast in some usage scenarios.

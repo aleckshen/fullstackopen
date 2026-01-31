@@ -1,4 +1,5 @@
 const Blog = require('../models/blog')
+const User = require('../models/user')
 
 const initialBlogs = [
   {
@@ -12,6 +13,19 @@ const initialBlogs = [
     author: "Ashlee",
     url: "https://www.ashleeshum.com/",
     likes: 8
+  }
+]
+
+const initialUsers = [
+  {
+    username: "aleckshen",
+    name: "aleck",
+    password: "shen"
+  },
+  {
+    username: "ashleeshum",
+    name: "ashlee",
+    password: "shum"
   }
 ]
 
@@ -38,4 +52,5 @@ module.exports = {
   initialBlogs,
   nonExistingId,
   blogsInDb,
+  initialUsers
 }
