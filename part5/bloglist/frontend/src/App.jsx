@@ -54,9 +54,9 @@ const App = () => {
     }
   }
 
-  const handleLogout = event => {
+  const handleLogout = () => {
     window.localStorage.removeItem('loggedUser')
-    window.location.reload();
+    window.location.reload()
   }
 
   const loginForm = () => (
