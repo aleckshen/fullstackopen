@@ -215,3 +215,363 @@ const App = () => {
 }
 ```
 Also note that within the Togglable component we need to use another react hook `forwardRef` this allows parent components to pass down reference to child components and for the child components to be able to alter or change it wihthout error.
+
+# Testing react apps
+
+To test our react application we will use a testing tool called Vitest. We can start by installing vitest and the jsdom library simulating a web browser:
+```
+npm install --save-dev vitest jsdom
+```
+In addition to vitest, we also need another testing library that will help us render components for testing purposes. The current best option for this is react-tesintg-library which has seen rapid growth in popularity in recent times. It is also worth extending the expresive power of the test with the library jest-dom. We can install the following libraries with the command:
+```
+npm install --save-dev @testing-library/react @testing-library/jest-dom
+```
+Before we can do the first test, we need some configurations. We can add a script to the package.json file to run the tests:
+```
+{
+  "scripts": {
+    // ...
+    "test": "vitest run"
+  }
+  // ...
+}
+```
+We can then create a file `testSetup.js` in the project root with the following content:
+```javascript
+import { afterEach } from 'vitest'
+import { cleanup } from '@testing-library/react'
+import '@testing-library/jest-dom/vitest'
+
+afterEach(() => {
+  cleanup()
+})
+```
+Now, after each test, the function `cleanup` is executed to reset jsdom, which is simulating the browser. We can then expand the `vite.config.js` file as follows:
+```
+export default defineConfig({
+  // ...
+  test: {
+    environment: 'jsdom',
+    globals: true,
+    setupFiles: './testSetup.js', 
+  }
+})
+```
+With globals being set to true, there is no need to import keywords such as `describe`, `test` and `expect` into tests. We can now write tests for the component that is responsible for rendering a note:
+```javascript
+const Note = ({ note, toggleImportance }) => {
+  const label = note.important
+    ? 'make not important'
+    : 'make important'
+
+  return (
+
+    <li className='note'>
+      {note.content}
+      <button onClick={toggleImportance}>{label}</button>
+    </li>
+  )
+}
+```
+Notice that the `li` element has the value note for the CSS attribute className, that could be used to access the component in our tests.
+
+# Rendering the component for tests
+
+We will write out test in the `src/components/Note.test.jsx` file, which is in the same directory as the component itself. The first test verifies that the component renders the contents of the note:
+```javascript
+import { render, screen } from '@testing-library/react'
+import Note from './Note'
+
+test('renders content', () => {
+  const note = {
+    content: 'Component testing is done with react-testing-library',
+    important: true
+  }
+
+  render(<Note note={note} />)
+
+  const element = screen.getByText('Component testing is done with react-testing-library')
+  expect(element).toBeDefined()
+})
+```
+After the initial configuration, the test renders the component with the render function provided by the react-testing-library:
+```javascript
+render(<Note note={note} />)
+```
+Normally react compoennts are rendered to the DOM. The render method we used renders the components in a format that is suitable for tests without rendering them to the DOM. We can use the object screen to access the rendered component. We use screens method `getByText` to search for an element that has the note content and ensure that it exists. The existence of an element is checked using Vitest's `expect` command. Expect generates an assertion for its argument, the validity of which can be tested using various condition functions. Now we used `toBeDefined` which tests whether the `element` argument of expect exists.
+
+Small note that eslint complains about the keywords `test` and `expect` in the tests so we can just extend our eslint config to this:
+```
+// ...
+
+export default [
+  // ...
+
+  {
+    files: ['**/*.test.{js,jsx}'],
+    languageOptions: {
+      globals: {
+        ...globals.vitest
+      }
+    }
+  }
+]
+```
+
+# Test file location
+
+In react there are (at least) two different conventions for the test files location. We created our test files according to the current standard by placing them in the same directory as the component being tested. The other convention is to store the test files "normally" in a seperate `test` directory.
+
+# Searching for content in a component
+
+The react-testing-library offers many ways of investigating the content of the component being tested. In reality the `expect` in our test is not needed at all. Test fails if `getByText` does not find the element it is looking for. This method searches for an element that contains only the text provided as a parameter and nothing else. If we had a component that would render text like this:
+```javascript
+const Note = ({ note, toggleImportance }) => {
+  const label = note.important
+    ? 'make not important' : 'make important'
+
+  return (
+    <li className='note'>
+
+      Your awesome note: {note.content}
+      <button onClick={toggleImportance}>{label}</button>
+    </li>
+  )
+}
+
+export default Note
+```
+The `getByText` method would not find the element:
+```javascript
+test('renders content', () => {
+  const note = {
+    content: 'Does not work anymore :(',
+    important: true
+  }
+
+  render(<Note note={note} />)
+
+  const element = screen.getByText('Does not work anymore :(')
+
+  expect(element).toBeDefined()
+})
+```
+If we want to look for an element that contains the text, we could use an extra option:
+```javascript
+const element = screen.getByText(
+  'Does not work anymore :(', { exact: false }
+)
+```
+Or we could use the `findByText` method:
+```javascript
+const element = await screen.findByText('Does not work anymore :(')
+```
+It is importatnt to note that unlike the other `byText` methods, `findByText` returns a promise.
+
+There are situations where yet another form of the queryByText method is useful. The method returns the element but it does not cause an exception if it is not found. We could eg. use the method to ensure that something is not rendered to the component:
+```javascript
+test('does not render this', () => {
+  const note = {
+    content: 'This is a reminder',
+    important: true
+  }
+
+  render(<Note note={note} />)
+
+  const element = screen.queryByText('do not want this thing to be rendered')
+  expect(element).toBeNull()
+})
+```
+Other methods also exist, such as `getByTestId`, which searches for elements based on id fields specifcally createrd for testing purposes. We could alos use CSS-selectors to find rendered elements by using the method `querySelector` of the object container that is one of the fields returned by the render:
+```javascript
+import { render, screen } from '@testing-library/react'
+import Note from './Note'
+
+test('renders content', () => {
+  const note = {
+    content: 'Component testing is done with react-testing-library',
+    important: true
+  }
+
+
+  const { container } = render(<Note note={note} />)
+
+
+  const div = container.querySelector('.note')
+  expect(div).toHaveTextContent(
+    'Component testing is done with react-testing-library'
+  )
+})
+```
+
+# Debugging tests
+
+We can often run into many kinds of problems when writing our tests. Object `screen` has a method `debug` that can be used to print the HTML of a component to the terminal. IF we change the test as follows:
+```javascript
+import { render, screen } from '@testing-library/react'
+import Note from './Note'
+
+test('renders content', () => {
+  const note = {
+    content: 'Component testing is done with react-testing-library',
+    important: true
+  }
+
+  render(<Note note={note} />)
+
+
+  screen.debug()
+  // ...
+})
+```
+The HTML gets printed to the console. It is also possible to use the same method to print a wanted element to console:
+```javascript
+const element = screen.getByText('Component testing is done with react-testing-library')
+
+screen.debug(element)
+```
+
+# Clicking buttons in tests
+
+In addition to displaying content, the Note component also makes sure that when the button associated with the note is pressed, the `toggleImportance` event handler function gets called. We can install a library `user-event` that makes simulating user input a bit easier:
+```
+npm install --save-dev @testing-library/user-event
+```
+Testing the functionality can be accomplished like this:
+```javascript
+import { render, screen } from '@testing-library/react'
+
+import userEvent from '@testing-library/user-event'
+import Note from './Note'
+
+// ...
+
+test('clicking the button calls event handler once', async () => {
+  const note = {
+    content: 'Component testing is done with react-testing-library',
+    important: true
+  }
+  
+
+  const mockHandler = vi.fn()
+
+  render(
+
+    <Note note={note} toggleImportance={mockHandler} />
+  )
+
+
+  const user = userEvent.setup()
+  const button = screen.getByText('make not important')
+  await user.click(button)
+
+
+  expect(mockHandler.mock.calls).toHaveLength(1)
+})
+```
+
+# Testing forms
+
+We already used the `click` function of the user-event in our previous test to click buttons. We can also simulate text input with userEvent. We can make a test for the NoteForm component. The form works by calling the function received as props `createNote`, with the details of the new note. The test is as follows:
+```javascript
+import { render, screen } from '@testing-library/react'
+import NoteForm from './NoteForm'
+import userEvent from '@testing-library/user-event'
+
+test('<NoteForm /> updates parent state and calls onSubmit', async () => {
+  const createNote = vi.fn()
+  const user = userEvent.setup()
+
+  render(<NoteForm createNote={createNote} />)
+
+  const input = screen.getByRole('textbox')
+  const sendButton = screen.getByText('save')
+
+  await user.type(input, 'testing a form...')
+  await user.click(sendButton)
+
+  expect(createNote.mock.calls).toHaveLength(1)
+  expect(createNote.mock.calls[0][0].content).toBe('testing a form...')
+})
+```
+Tests get access to the input field using the function getByRole. The method type of the userEvent is used to write text to the input field. The first test expectation ensures that submitting the form calls the createNote method. The second expectation checks that the event handler is called with the right parameters - that a note with the correct content is created when the form is filled.
+
+# About finding elements
+
+If our form has two input fields we cannot use the approach:
+```
+const input = screen.getByRole('textbox')
+```
+We would get an error, the error message suggests using `getAllByRole`. The test could be fixed as follows:
+```javascript
+const inputs = screen.getAllByRole('textbox')
+
+await user.type(inputs[0], 'testing a form...')
+```
+This method returns an array and the right input field is the first element of the array. However, this approach is a bit suspicious since it relies on the order of the input fields. If an label were defined for the input field, the input field could be located using it with the `getByLabelText` method. For example, if we added a label to the input field like this:
+```javascript
+  // ...
+
+  <label>
+    content
+    <input
+      value={newNote}
+      onChange={event => setNewNote(event.target.value)}
+    />
+
+  </label>
+  // ...
+```
+Then the test could locate the input field as folows:
+```javascript
+test('<NoteForm /> updates parent state and calls onSubmit', async () => {
+  const user = userEvent.setup()
+  const createNote = vi.fn()
+
+  render(<NoteForm createNote={createNote} />) 
+
+
+  const input = screen.getByLabelText('content')
+  const sendButton = screen.getByText('save')
+
+  await user.type(input, 'testing a form...')
+  await user.click(sendButton)
+
+  expect(createNote.mock.calls).toHaveLength(1)
+  expect(createNote.mock.calls[0][0].content).toBe('testing a form...')
+})
+```
+Quite often input fields have a placeholder text that hints user what kind of input is expected. Let us add a placeholder to our form:
+```javascript
+<input
+  value={newNote}
+  onChange={event => setNewNote(event.target.value)}
+  placeholder='write note content here'
+/>
+```
+Now finding the right input field is easy with the method getByPlaceholderText:
+```javascript
+test('<NoteForm /> updates parent state and calls onSubmit', async () => {
+  const user = userEvent.setup()
+  const createNote = vi.fn()
+
+  render(<NoteForm createNote={createNote} />) 
+
+
+  const input = screen.getByPlaceholderText('write note content here')
+  const sendButton = screen.getByText('save')
+
+  await user.type(input, 'testing a form...')
+  await user.click(sendButton)
+
+  expect(createNote.mock.calls).toHaveLength(1)
+  expect(createNote.mock.calls[0][0].content).toBe('testing a form...')
+})```
+
+# Test coverage
+
+We can easily find out the coverage of our tests by running them with the command:
+```
+npm test -- --coverage
+```
+The first time you run the command, vitest will ask you if you want to install the required library `@vitest/coverage-v8`. We can install, and run the command again.
