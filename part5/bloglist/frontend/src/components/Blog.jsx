@@ -1,6 +1,7 @@
 import { useState } from 'react'
+import blogService from '../services/blogs'
 
-const Blog = ({ blog, onLike, onDelete }) => {
+const Blog = ({ blog, user, onLike, onDelete }) => {
   const [visible, setVisible] = useState(true)
 
   const hide = { display: visible ? 'none' : '' }
@@ -18,14 +19,8 @@ const Blog = ({ blog, onLike, onDelete }) => {
     marginBottom: 5
   }
 
-  const handleDelete = () => {
-    if (window.confirm(`Remove blog ${blog.title} by ${blog.author}?`)) {
-      onDelete(blog)
-    }
-  }
-
   return (
-    <div style={blogStyle}>
+    <div style={blogStyle} className='blog'>
       <div style={show}>
         {blog.title}
         <button onClick={() => toggleVisibility()}>view</button>
@@ -39,7 +34,9 @@ const Blog = ({ blog, onLike, onDelete }) => {
           <button onClick={() => onLike(blog)}>like</button>
         </div>
         <div>{blog.author}</div>
-        <button onClick={handleDelete}>remove</button>
+        {blog.user && user.username === blog.user.username && (
+          <button onClick={() => onDelete(blog)} >remove</button>
+        )}
       </div>
     </div>
   )

@@ -566,7 +566,8 @@ test('<NoteForm /> updates parent state and calls onSubmit', async () => {
 
   expect(createNote.mock.calls).toHaveLength(1)
   expect(createNote.mock.calls[0][0].content).toBe('testing a form...')
-})```
+})
+```
 
 # Test coverage
 
@@ -575,3 +576,278 @@ We can easily find out the coverage of our tests by running them with the comman
 npm test -- --coverage
 ```
 The first time you run the command, vitest will ask you if you want to install the required library `@vitest/coverage-v8`. We can install, and run the command again.
+
+# Snapshot testing
+
+Vitest offers a completely different alternative to "traditional" testing called snapshot testing. The interesting feature of snapshot testing is that developers do not need to define any tests themselve, it is simple enough to adopt snapshot testing. The fundamental principle is to compare the HTML code defined by the components after it has changed to the HTML code that existed before it was changed.
+
+If the snapshot notices some change in the HTML defined by the component, then either it is new functionality or a "bug" caused by accident. Snapshot tests notify the developer if the HTML code of the component changes. The developer has to tell Vitest if the change was desired or undesired. If the change to the HTML code is unexpected, it strongly implies a bug, and the developer can become aware of these potential issues easily thanks to snapshot testing.
+
+# Playwright
+
+Two of the most popular end to end testing frameworks include cypress and playwright. Towards the end of 2023 playwrights popularity sky rocketed, playwright is roughly on par with cypress in terms of ease to use. Cypress is radically different from most libraries suitable for e2e testing, as cypress test are run entirely within the browser. Playwrights tests, on the other hand, are executed in the Node process, which is connected to the browser via programming interfaces.
+
+# Initializing tests
+
+In the root of our project directory, we can create a directory `e2e` and run the command `npm init playwright@latest` to install playwright. After answering the questions for the installation script, playwright will be installed.
+
+We can first start by defining an npm script for running tests and test reports in our `package.json`:
+```javascript
+{
+  // ...
+  "scripts": {
+    "test": "playwright test",
+    "test:report": "playwright show-report"
+  },
+  // ...
+}
+```
+During installation, a example test file will be generated alongside our playwright config. We can run our tests with the command:
+```
+npm test
+```
+We can also use:
+```
+npm run test:report
+```
+Tests can also be run via a graphical UI with the command:
+```
+npm run test -- --ui
+```
+
+# Testing our own code
+
+Playwright assumes that the system under test is running when the tests are executed. Unlike, for example, backend integration tests, playwright tests do not start the system under test during testing. We can make a npm script for the backend, which will enable it to be started in testing mode, i.e so that NODE_ENV gets the value test.
+```javascript
+{
+  // ...
+  "scripts": {
+    "start": "cross-env NODE_ENV=production node index.js",
+    "dev": "cross-env NODE_ENV=development node --watch index.js",
+    "test": "cross-env NODE_ENV=test node --test",
+    "lint": "eslint .",
+    // ...
+
+    "start:test": "cross-env NODE_ENV=test node --watch index.js"
+  },
+  // ...
+}
+```
+We can start our frontend and backend, and create the first test file for the application `tests/note_app.spec.js`:
+```javascript
+const { test, expect } = require('@playwright/test')
+
+test('front page can be opened', async ({ page }) => {
+  await page.goto('http://localhost:5173')
+
+  const locator = page.getByText('Notes')
+  await expect(locator).toBeVisible()
+  await expect(page.getByText('Note app, Department of Computer Science, University of Helsinki 2025')).toBeVisible()
+})
+```
+First, the test opens the application with the method page.goto. After this, it uses the page.getByText to get a locator that corresponds to the element where the text Notes is found. The method toBeVisible ensures that the element corresponding to the locator is visible at the page. The second check is done without using the auxiliary variable.
+
+In the big picture, it is a good thing that the testing takes place with all three commonly used browser engines, but this is slow, and when developing the tests it si probabaly best to carry them out mainly with one browser. You can define the browser engine to be used with the command line param:
+```
+npm test -- -- project chromium
+```
+When tests pass the execution of the tests is quite fast, but much slower if they do not pass. The reason for this is that playwrights policy is to wait for searched elements until they are rendered and ready for action. If the element is not found, a `TimeoutError` is raised and the test fails. Plauwright waits for elements by default for 5 or 30 seconds depending on the functions used in testing.
+
+When developing tests, it may be wiser to reeduce the waiting time to a few seconds. This can be done by changing the file `playwright.config.js` as follows:
+```
+export default defineConfig({
+  // ...
+
+  timeout: 3000,
+  fullyParallel: false,
+  workers: 1,
+  // ...
+})
+```
+We also made two other changes to the file, specifying that all tests be executed one at a time. With the default config, the execution happens in parallel, and since our tests use a database, parallel execution causes problems.
+
+# Writing on the form
+
+We can write a new test that tries to log into the application. We can assume that a user is stored in the database , with the username aleckshen and password shen. We can start by opening the login form.
+```javascript
+describe('Note app', () => {
+  // ...
+
+  test('user can log in', async ({ page }) => {
+    await page.goto('http://localhost:5173')
+
+    await page.getByRole('button', { name: 'login' }).click()
+  })
+})
+```
+The test first uses the method page.getByRole to retrieve the button based on its text. The method returns the Locator corresponding to the Button element. Pressing the button is performed using the Locator method click.
+
+When developing tests, we can also use playwrights UI mode, i.e. the user interface version by running the command `npm test -- --ui`.
+
+When the form is opened, the test should look for the text fields and enter the username and password in them. Lets make the first attempt using the method `page.getByRole`, note that we need to apply `.first` and `.last` since we have two texts fields.
+```javascript
+await page.getByRole('textbox').first().fill('aleckshen')
+    await page.getByRole('textbox').last().fill('shen')
+    await page.getByRole('button', { name: 'login' }).click()
+  
+    await expect(page.getByText('aleck logged in')).toBeVisible()
+```
+If there weer more than two texts fields, using methods `first` and `last` would not be enough. One possibility would be to use the `all` method, which turns the foudn locators into an array that can be indexed:
+```javascript
+textboxes = await page.getByRole('textbox').all()
+    await textboxes[0].fill('aleckshen')
+    await textboxes[1].fill('shen')
+```
+However both versions of this test are problematic as they rely on the ordering of the fields to work. If an element is difficult to locate in tests, you can assign it a separate test-id attribute and find the element in tests uinsg the `getByTestId` method. Since our forms input fields have unique labels assigned we can use the `getByLabel` method:
+```javascript
+await page.getByLabel('username').fill('aleckshen')
+await page.getByLabel('password').fill('shen')
+```
+When locating elements, it makes sense to aim to utilize the content visible to the user in the interface, as this best simulates how a user would actually find the desired input field while navigating the application.
+
+# Test initialization
+
+Since both tests start in the same way, i.e. by opening the page `http://localhost:5173`, it is recommedned to isolate the common part in the `beforeEach` block that is executed before each test:
+```javascript
+beforeEach(async ({ page }) => {
+  await page.goto('http://localhost:5173')
+})
+```
+
+# Controlling the state of the database
+
+It becomes more complicated when our code needs to touch the database. Ideally, the servers database should be the same each time we run the tests, so our tests can be reliably and easily repeatable. As with unit and integration tests it is best to empty the database and possible format it before the tests are run. The challenge with e2e tests is that they do not have access to the database.
+
+The solution is to create API endpoints for the backend tests. We can empty the database using these endpoints. Lets create a new router for tests inside the controllers folder, in the testing.js file.
+```javascript
+const router = require('express').Router()
+const Note = require('../models/note')
+const User = require('../models/user')
+
+router.post('/reset', async (request, response) => {
+  await Note.deleteMany({})
+  await User.deleteMany({})
+
+  response.status(204).end()
+})
+
+module.exports = router
+```
+And then we will add it to the backend only if the application is run in test-mode:
+```javascript
+// ...
+
+app.use('/api/login', loginRouter)
+app.use('/api/users', usersRouter)
+app.use('/api/notes', notesRouter)
+
+
+if (process.env.NODE_ENV === 'test') {
+  const testingRouter = require('./controllers/testing')
+  app.use('/api/testing', testingRouter)
+}
+
+app.use(middleware.unknownEndpoint)
+app.use(middleware.errorHandler)
+
+module.exports = app
+```
+After the changes, an HTTP POST request to the `/api/testing/reset` endpoint empties the database. Make sure backend is running in test mode by starting it with this command:
+```
+npm run start:test
+```
+Next we will change the `beforeEach` block so that it empties the servers database before the tests are run. Currently, it is not possible to add new users through the frontends UI, so we add a new user to the backend from the beforeEach block.
+```javascript
+describe('Note app', () => {
+  beforeEach(async ({ page, request }) => {
+    await request.post('http://localhost:3001/api/testing/reset')
+    await request.post('http://localhost:3001/api/users', {
+      data: {
+        name: 'aleck',
+        username: 'aleckshen',
+        password: 'shen'
+      }
+    })
+
+    await page.goto('http://localhost:5173')
+  })
+})
+```
+
+# Helper functions for tests
+
+We have a lot of duplicate code written for tests, and often we will repeat the same events in different tests. We can use a helper function that is made in a seperate file such as `tests/helper.js` to help us isolate code. For example we can isolate the code that handles the login as a helper function:
+```javascript
+const loginWith = async (page, username, password)  => {
+  await page.getByRole('button', { name: 'login' }).click()
+  await page.getByLabel('username').fill(username)
+  await page.getByLabel('password').fill(password)
+  await page.getByRole('button', { name: 'login' }).click()
+}
+
+export { loginWith }
+```
+We can now use the `loginWith` helper function in our tests:
+```javascript
+{ loginWith } = require('./helper')
+
+describe('Note app', () => {
+  // ...
+
+  test('user can log in', async ({ page }) => {
+    await loginWith(page, 'mluukkai', 'salainen')
+    await expect(page.getByText('Matti Luukkainen logged in')).toBeVisible()
+  })
+})
+```
+
+# Test development and debugging
+
+If, and when the tests dont pass and you suspect that the fault is in the tests instead of in the code, you should run the tests in debug mode. The following command runs the problematic test in debug mode:
+```
+npm test -- g'one of those can be made nonimportant' --debug
+```
+Playwright inspector shows the progress of the test step by step. The arrow-dot button at the top takes the tests on step further. By default, debug steps through the test command by command. If it is a complex test, it can be quite a burden to step through the test to the point of interest. This can be avoided by using the command `await page.pause()`:
+```javascript
+test('one of those can be made nonimportant', async ({ page }) => {
+    await page.pause()
+    const otherNoteText = page.getByText('second note')
+    const otherNoteElement = otherNoteText.locator('..')
+
+    await otherNoteElement.getByRole('button', { name: 'make not important' }).click()
+    await expect(otherNoteElement.getByText('make important')).toBeVisible()
+})
+```
+Now in the test you can go to `page.pause()` in one step, by pressing the green arrow symbol in the inspector.
+
+Note that one problematic test case can be trying to create multiple notes/resources at once, for example if we try to create three notes in a row we will only render the first not created and the third note created sometimes. This is because when the test creates one note, it starts creating the next one even before the server has responded, and the added note is rednered on the screen. This in turn can cause some notes to be lost, since the brwoser is re-rendered when the server responds, based on the state of the notes at the start of that insert operation.
+
+The problme can be solved by "slowing down" the insert operation by using `waitFor` command after the insert to wait for the inserted note to render:
+```javascript
+const createNote = async (page, content) => {
+  await page.getByRole('button', { name: 'new note' }).click()
+  await page.getByRole('textbox').fill(content)
+  await page.getByRole('button', { name: 'save' }).click()
+
+  await page.getByText(content).waitFor()
+}
+```
+Almost the same as ui mode is use of the playwrights trace viewer. The idea is that a "visual trace" of the tests is saved, which can be viewed if necessary after the tests have been completed. A trace is saved by running the tests as follows:
+```
+npm run test -- --trace on
+```
+If necessary, trace can be viewed with the command:
+```
+npx playwright show-report
+```
+Or with the npm script we defined `npm run test:report`.
+
+Ui mode and trace viewer also offer the possibility of assisted search for locators. This is done by pressing the double circle on the left side of the lower bar, and then by clicking the desired user interface element. Playwright displays the element locator, for example:
+```javascript
+page.locator('li').filter({ hasText: 'third note' }).getByRole('button')
+```
+Playwright also includes a test generator that makes it possible to "record" a test through the user interface. The test generator is started with the command:
+```
+npx playwright codegen http://localhost:5173/
+```
+When the `Record` mode is on, the test generator "records" the users interaction in the playwright inspector, from where it is possible to copy the locators and actions to the tests.
