@@ -363,3 +363,44 @@ Usually, selector functions are a bit more interesting and return only selected 
 ```javascript
 const importantNotes = useSelector(state => state.filter(note => note.important))
 ```
+
+# Combined reducers
+
+We want to store both the current notes we have saved and also the type of filter we want to state. Our global state store should look like this:
+```javascript
+{
+  notes: [
+    { content: 'reducer defines how redux store works', important: true, id: 1},
+    { content: 'state of store can contain any data', important: false, id: 2}
+  ],
+  filter: 'IMPORTANT'
+}
+```
+To do this we will start by creating a new reducer to store the state of the filter.
+
+After doing so we can create the actual reducer for out application by combining the two exisiting reducers with the `combineReducers` function. We can defined thje combined reducer in the `main.jsx` file like so:
+```javascript
+import ReactDOM from 'react-dom/client'
+import { Provider } from 'react-redux'
+import { createStore, combineReducers } from 'redux'
+
+import App from './App'
+import filterReducer from './reducers/filterReducer'
+import noteReducer from './reducers/noteReducer'
+
+const reducer = combineReducers({
+  notes: noteReducer,
+  filter: filterReducer
+})
+
+const store = createStore(reducer)
+
+console.log(store.getState())
+
+ReactDOM.createRoot(document.getElementById('root')).render(
+  <Provider store={store}>
+    <div />
+  </Provider>
+)
+```
+The state of our store defined by the reducer above is an object with two properties, notes and filter. The value of the notes property is defined by the `noteReducer`, which does not have to deal with the other properties of the state. Likewise, the filter property is managed by the `filterReducer`.
