@@ -174,3 +174,192 @@ console.log(first)     // prints 1
 console.log(second)   // prints 2
 console.log(rest)     // prints [3, 4, 5, 6]
 ```
+
+# Uncontrolled form
+
+We can expand the functionality of our `note-redux` application:
+```javascript
+// ...
+
+
+const generateId = () => Number((Math.random() * 1000000).toFixed(0))
+
+const App = () => {
+
+  const addNote = event => {
+    event.preventDefault()
+    const content = event.target.note.value
+    event.target.note.value = ''
+    store.dispatch({
+      type: 'NEW_NOTE',
+      payload: {
+        content,
+        important: false,
+        id: generateId()
+      }
+    })
+  }
+
+
+  const toggleImportance = id => {
+    store.dispatch({
+      type: 'TOGGLE_IMPORTANCE',
+      payload: { id }
+    })
+  }
+
+  return (
+    <div>
+
+      <form onSubmit={addNote}>
+        <input name="note" /> 
+        <button type="submit">add</button>
+      </form>
+      <ul>
+        {store.getState().map(note => (
+
+          <li key={note.id} onClick={() => toggleImportance(note.id)}>
+            {note.content} <strong>{note.important ? 'important' : ''}</strong>
+          </li>
+        ))}
+      </ul>
+    </div>
+  )
+}
+
+// ...
+```
+Note that we have not bound the state of the form fields to the state of the app component like we have previously done. React calls this kind of form uncontrolled. Uncontrolled forms have certain limitations (for example, dynamic error messages or disabling the submit button based on input are not possible). However they are suitable for our current needs.
+
+# Action creators
+
+React components dont need to know redux action types and forms. We can seperate creating actions into seperate functions:
+```javascript
+const createNote = content => {
+  return {
+    type: 'NEW_NOTE',
+    payload: {
+      content,
+      important: false,
+      id: generateId()
+    }
+  }
+}
+
+const toggleImportanceOf = id => {
+  return {
+    type: 'TOGGLE_IMPORTANCE',
+    payload: { id }
+  }
+}
+```
+Functions that create actions are called action creators.
+
+The app component does not have to know anything about the inner representation of the actions anymore, it just gets the right action by calling the creator function:
+```javascript
+const App = () => {
+  const addNote = event => {
+    event.preventDefault()
+    const content = event.target.note.value
+    event.target.note.value = ''
+
+    store.dispatch(createNote(content))
+    
+  }
+  
+  const toggleImportance = id => {
+
+    store.dispatch(toggleImportanceOf(id))
+  }
+
+  // ...
+}
+```
+
+# Forwarding redux store to various components
+
+Aside from our reducer, our application is in one file. This is of course not sensible, and we should seperate App into its own module. The question is, how can the app access the store after the move? And more broadly, when a component is composed of many smaller components, there must be a way for all of the components to access the store.
+
+There are multiple ways to share the redux store with components. First, we will look into the newest, and possibly the easiest way, which is using the `hooks` API of the `react-redux` library. We can install this with:
+```
+npm install react-redux
+```
+We can reorganize the application code into different files. Our `main.jsx` file will now look like this:
+```javascript
+import ReactDOM from 'react-dom/client'
+import { createStore } from 'redux'
+import { Provider } from 'react-redux'
+
+import App from './App'
+import noteReducer from './reducers/noteReducer'
+
+const store = createStore(noteReducer)
+
+ReactDOM.createRoot(document.getElementById('root')).render(
+  <Provider store={store}>
+    <App />
+  </Provider>
+)
+```
+Now the application is now defined as a child of a `Provider` component provided by the react-redux library. The applications store is goven to the `Provider` as its attribute store. This makes the store accessible to all components in the application, as we will soon see. We will also move all our action creators to the file where the reducer is defined.
+
+Our `App.jsx` will now look look like this:
+```javascript
+import { createNote, toggleImportanceOf } from './reducers/noteReducer'
+import { useSelector, useDispatch } from 'react-redux'
+
+const App = () => {
+  const dispatch = useDispatch()
+  const notes = useSelector(state => state)
+
+  const addNote = event => {
+    event.preventDefault()
+    const content = event.target.note.value
+    event.target.note.value = ''
+    dispatch(createNote(content))
+  }
+
+  const toggleImportance = id => {
+    dispatch(toggleImportanceOf(id))
+  }
+
+  return (
+    <div>
+      <form onSubmit={addNote}>
+        <input name="note" />
+        <button type="submit" >add</button>
+      </form>
+      <ul>
+        {notes.map(note => (
+          <li key={note.id} onClick={() => toggleImportance(note.id)}>
+            {note.content} <strong>{note.important ? 'important' : ''}</strong>
+          </li>
+        ))}
+      </ul>
+    </div>
+  )
+}
+
+export default App
+```
+Instead of using the dispatch method from the redux store we will now use the dispatch function from the `useDispatch` hook from the react-redux library. The hook provides any react component access to the dispatch function of the redux store defined in `main.jsx`. This allows all components to mkake changes to the state of the redux store. 
+
+The component can access the notes stored in the store with the `useSelector` hook of the react-redux library. 
+```javascript
+import { useSelector, useDispatch } from 'react-redux'
+
+const App = () => {
+  // ...
+
+  const notes = useSelector(state => state)
+  // ...
+}
+```
+`useSelector` receives a function as a parmeter. The function either searches for or selects data from the redux store. Here we need all of the notes, so our selector function returns the whole state:
+```
+state => state
+```
+Usually, selector functions are a bit more interesting and return only selected parts of the contents of the redux store. For example we could return only notes marked as important:
+```javascript
+const importantNotes = useSelector(state => state.filter(note => note.important))
+```
