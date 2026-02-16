@@ -404,3 +404,112 @@ ReactDOM.createRoot(document.getElementById('root')).render(
 )
 ```
 The state of our store defined by the reducer above is an object with two properties, notes and filter. The value of the notes property is defined by the `noteReducer`, which does not have to deal with the other properties of the state. Likewise, the filter property is managed by the `filterReducer`.
+
+# Redux toolkit and refactoring store config
+
+So far we have seenm that refux's configuration and state management implementation requires quite a lot of effort. Redux toolkit is a library that solves these common redux-related problems. The library for example greatly simplifies the configuration of the redux store and offers a large variety of tools to ease state management. We can install redux toolkit with the following command:
+```
+npm install @reduxjs/toolkit
+```
+Next we will use `configureStore` instead of redux's `createStore` function.
+```javascript
+import { configureStore } from '@reduxjs/toolkit'
+
+const store = configureStore({
+  reducer: {
+    notes: noteReducer,
+    filter: filterReducer
+  }
+})
+```
+We can further clean up the `main.jsx` file by moving the code related to the creation of the redux store intoa seperate file. We can create this file at `src/store.js`
+
+# Redux toolkit and refactoring  reducers
+
+Next we can refactor our reducers using the redux toolkit. With redux toolkit, we can easily create reducer and related action creators using the `createSlice` function. We can use the `createSlice` function to refactor the reducer and action creators in the `reducers/noteReducer.js` file:
+```javascript
+import { createSlice } from '@reduxjs/toolkit'
+
+const initialState = [
+  {
+    content: 'reducer defines how redux store works',
+    important: true,
+    id: 1,
+  },
+  {
+    content: 'state of store can contain any data',
+    important: false,
+    id: 2,
+  },
+]
+
+const generateId = () =>
+  Number((Math.random() * 1000000).toFixed(0))
+
+
+const noteSlice = createSlice({
+  name: 'notes',
+  initialState,
+  reducers: {
+    createNote(state, action) {
+      const content = action.payload
+      state.push({
+        content,
+        important: false,
+        id: generateId(),
+      })
+    },
+    toggleImportanceOf(state, action) {
+      const id = action.payload
+      const noteToChange = state.find(n => n.id === id)
+      const changedNote = { 
+        ...noteToChange, 
+        important: !noteToChange.important 
+      }
+      return state.map(note =>
+        note.id !== id ? note : changedNote 
+      )     
+    }
+  },
+})
+
+
+export const { createNote, toggleImportanceOf } = noteSlice.actions
+export default noteSlice.reducer
+```
+The `createSlice` functions name parmeter defines the prefix whihc is used in the actions type values. For example. the `createNote` actions defined later will have the type value of `notes/createNote`. It is good practice to give the parameter a value which is unique among the reducers. This way there wont be unexpected collisions between the applications action type values. The `initialState` parameter defined the reducers initial state. The `reducers` parameter takes the reducer itself as an object, of which functions handle state changes caused by certain actions. Note that the `action.payload` in the function contains the argument provided by calling the action creator:
+```javascript
+dispatch(createNote('Redux Toolkit is awesome!'))
+```
+This dispatch call is equivalent to dispatching the following object:
+```javascript
+dispatch({ type: 'notes/createNote', payload: 'Redux Toolkit is awesome!' })
+```
+
+Also note that in the code we actually directly mutate state. Reudx toolkit utilizes the `Immer` library with reducers created by `createSlice` function, which makes it possible to mutate the `state` inside the reducer. Immer uses the mutated state to produce a new, immutable state and this the state changes remain immutable. Note that `state` can be changed without "mutating it", as we have done with the `toggleImportanceOf` action. In this case, the function directly returns the new state. Nevertheless mutating the state will often come in handy when a complex state needs to be updated.
+
+The `createSlice` function returns an object containing the reducer as well as the action creators defined by the `reducers` parameter. The reducer can be accessed by the `noteSlice.reducer` property, whereas the action creators by the `noteSlice.actions` property. 
+
+# Redux toolkit and console.log
+
+If we try to print the state of the redux store in the middle of a reducer created with the function `createSlice` we will get the following printed to console:
+```
+Proxy(Array) {0: {…}}
+  [[Handler]]: null
+  [[Target]]: null
+  [[IsRevoked]]: true
+```
+The output is not very useful. This is because of the `Immer` library that is used by redux toolkit internally to save the state of the store. The state can be converted to a human readable format by using the `current` function from redux toolkit. The function can be imported with the following command:
+```javascript
+import { current } from '@reduxjs/toolkit'
+```
+And after this, the state can be printed to the console with the following command:
+```javascript
+console.log(current(state))
+```
+
+# Redux devtools
+
+Redux devtools is a chrome addon that offers useful development tools for redux. It can be used for example to inspect the redux stores state and dispatch actions through the browsers console. When the store is created using redux toolkits `configureStore` function, no additional configuration is needed for refux devtools to work. Once the addon is installed, clicking the redux tab in the browsers developer tools, the redux devtools will open.
+
+Using redux devtools, we can inspect how dispatching a certain action changes the state by clicking the action and also dispatch actions to the store using the developments tools itself.
