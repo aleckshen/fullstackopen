@@ -513,3 +513,136 @@ console.log(current(state))
 Redux devtools is a chrome addon that offers useful development tools for redux. It can be used for example to inspect the redux stores state and dispatch actions through the browsers console. When the store is created using redux toolkits `configureStore` function, no additional configuration is needed for refux devtools to work. Once the addon is installed, clicking the redux tab in the browsers developer tools, the redux devtools will open.
 
 Using redux devtools, we can inspect how dispatching a certain action changes the state by clicking the action and also dispatch actions to the store using the developments tools itself.
+
+# Fetch API
+
+In software development, we need to consider whether a certain functionality should be implemented using an external library or whether it is better to utilize the native solutions provided by the environment. 
+
+In the earlier parts of the course we used axios library to make HTTP requests. We will explore a alternative way to make HTTP requests using the native fetch API. It is typical for an external library like axios to be implemented using other external libraries. For example, if you install axios in your project with the command `npm install axios`, a bunch of other package are installed in order for axios to function.
+
+The fetch API provides a similar way to make HTTP requests as axios, but using fetch API does not require installing any external libraries. Maintaining the application becomes easier when there are fewer libraries to update, and security is also improved because the potential attack surface of the application is reduced. In practice, requests are made using the `fetch()` function. The syntax used differs from axios. We will also notice that axios has taken care of some things for us and made our lives easier. However, we will now use the fetch API, as it is a widely used native solution.
+
+# Getting data from the backend
+
+We can create a methjod for fetching data from the backend in the file `src/services/notes.js`:
+```javascript
+const baseUrl = 'http://localhost:3001/notes'
+
+const getAll = async () => {
+  const response = await fetch(baseUrl)
+
+  if (!response.ok) {
+    throw new Error('Failed to fetch notes')
+  }
+
+  const data = await response.json()
+  return data
+}
+
+export default { getAll }
+```
+We will use the `fetch()` function which takes the backends URL as an argument to retrieve all notes from the backend. Since we didnt define the request type, fetch performs its default action, which is a GET request. Once the response has arrived, we have to check the success of the request using `response.ok` since fetch doesnt automatically throw erros based on unsuccessful response codes.
+
+If the request is successful, the data contained in the response is converted to JSON format:
+```javascript
+const data = await response.json()
+```
+`fetch` does not automatically convert any data included in the response to JSON format, so we have to convert it manually. Also the `response.json` is an asynchronous method, so the `await` keyword is required. We can further simplfy the code by directly returning the data returned by the `response.json()` method:
+```javascript
+const getAll = async () => {
+  const response = await fetch(baseUrl)
+
+  if (!response.ok) {
+    throw new Error('Failed to fetch notes')
+  }
+
+
+  return await response.json()
+}
+```
+
+# Initializing the store with data fetched from the server
+
+First we will set `initialState` in the note reducer to be a empty array. Next we will create a new action creator called `setNotes`, which allows us to directly replace the array of notes.
+```
+javascript
+setNotes(state, action) {
+  return action.payload
+}
+```
+Next we will implement thje initialization of notes in the app component. As is usually the case when fetching data from a server, we will use the `useEffect` hook:
+```javascript
+useEffect(() => {
+  noteService.getAll().then(notes => dispatch(setNotes(notes)))
+}, [dispatch])
+```
+The notes are fetched from the server using the `getAll` method we defined, and then stored in the redux store by dispatching the action returned by the `setNotes` action creator. Notice a small detail, we have added the `dispatch` variable to the dependency array of the use effect hook. Logically the code would work the same since the variable `dispatch` will never change but it is considered good programming practice to add all variables and functions used inside the `useEffect` hook that are defined within the component to the dependency array. This helps to avoid unexpected bugs.
+
+# Sending data to the backend
+
+We will implement the functionaility for sending a new note to the server. We will do this by creating a POST request using the `fetch()` method. We can extend our code in the services folder as follows:
+```javascript
+const createNew = async (content) => {
+  const response = await fetch(baseUrl, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ content, important: false }),
+  })
+  
+  if (!response.ok) {
+    throw new Error('Failed to create note')
+  }
+  
+  return await response.json()
+}
+```
+The first parameter of the fetch function specifies the URL to which the request is made. The second parameter is an object that defines other details of the request, such as the request type, headers, and the data sent with the request. We can further calrify the code by storing the objects that defines the object that defines the request details in a seperate options variable:
+```javascript
+const options = {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ content, important: false }),
+  }
+  
+  const response = await fetch(baseUrl, options)
+```
+Taking a closer look at the options object:
+- `method` defines the type of the request, which in this case is POST.
+- `headers` define the request headers. We add the header `'Content-Type': 'application/json'` to let the server know that the data sent with the request is in JSON format, so it can handle the request correctly.
+- `body` contains the data sent with the request. You cannot directly assign a javascript object to this field, it must be first converted to JSON string by calling the `JSON.stringify()` function.
+
+As with a GET request, the response status code is checked for errors. If the request is successful, JSON Server returns the newly created note, for which it has also generated a unique id. However, the data conmtained in the response still needs to be converted to JSON format using the `response.json()` method
+
+As with a GET request, the response status code is checked for errors. If the request is successful, JSON Server returns the newly created note, for which it has also generated a unique id. However, the data conmtained in the response still needs to be converted to JSON format using the `response.json()` method.
+
+We can now modify our `NoteForm` component so that a new note is sent to the backend. THe components `addNote` method will change slightly:
+```javascript
+import { useDispatch } from 'react-redux'
+import { createNote } from '../reducers/noteReducer'
+
+import noteService from '../services/notes'
+
+const NoteForm = (props) => {
+  const dispatch = useDispatch()
+  
+
+  const addNote = async (event) => {
+    event.preventDefault()
+    const content = event.target.note.value
+    event.target.note.value = ''
+
+    const newNote = await noteService.createNew(content)
+    dispatch(createNote(newNote))
+  }
+
+  return (
+    <form onSubmit={addNote}>
+      <input name="note" />
+      <button type="submit">add</button>
+    </form>
+  )
+}
+
+export default NoteForm
+```
+When a new note is created in the backend by calling the `createNew()` method, the return value is an object representing the note, to which the backend has generated a unique id. Therefore, we can modfiy the action creator `createNote` defined in the notes reducer to just push the `action.payload` instead of generating the unique id itself.
