@@ -24,4 +24,14 @@ const create = async (content) => {
   return await response.json()
 }
 
-export default { getAll, create }
+const vote = async (id, newObject) => {
+  const response = await fetch(`${baseUrl}/${id}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(newObject)
+  })
+
+  return response.json()
+}
+
+export default { getAll, create, vote }

@@ -646,3 +646,89 @@ const NoteForm = (props) => {
 export default NoteForm
 ```
 When a new note is created in the backend by calling the `createNew()` method, the return value is an object representing the note, to which the backend has generated a unique id. Therefore, we can modfiy the action creator `createNote` defined in the notes reducer to just push the `action.payload` instead of generating the unique id itself.
+
+# Asynchronous actions and redux thunk
+
+It is not great for communication with the server to happne inside the functions of the components. Ideally we would want the communication abstracted away from the components so that they dont have to do anything else but call the appropriate action creator. As an exmaple, our app component only dispatching notes or our note form component dispatching the note to be added. This would mean that both components would dispatch an action without the need to know about the communication with the server that happens behind the scenes. These kinds of async actions can be implemented using redux thunk library. The use of the library doesnt need any additional config or even installation when the redux store is created using the redux toolkits `configureStore` function.
+
+Thanks to redux thunk, its possible to define action creators that return a function instead of an object. This makes it possible to implement asynchronous action creators that first wait for some asynchronous operation to complete and only then dispatch the actual action.
+
+If an action creator returns a function, redux automatically passes the redux stores `dispatch` and `getState` methods as arguments to the returned function. This allows us to defined an action creator called `initalizeNotes` in the `noteReducer.js` file, which fetches the initial ntoes from the server as follows:
+```javascript
+import { createSlice } from '@reduxjs/toolkit'
+
+import noteService from '../services/notes'
+
+const noteSlice = createSlice({
+  name: 'notes',
+  initialState: [],
+  reducers: {
+    createNote(state, action) {
+      state.push(action.payload)
+    },
+    toggleImportanceOf(state, action) {
+      const id = action.payload
+      const noteToChange = state.find((n) => n.id === id)
+      const changedNote = {
+        ...noteToChange,
+        important: !noteToChange.important,
+      }
+      return state.map((note) => (note.id !== id ? note : changedNote))
+    },
+    setNotes(state, action) {
+      return action.payload
+    },
+  },
+})
+
+
+const { setNotes } = noteSlice.actions
+
+
+export const initializeNotes = () => {
+  return async (dispatch) => {
+    const notes = await noteService.getAll()
+    dispatch(setNotes(notes))
+  }
+}
+
+
+export const { createNote, toggleImportanceOf } = noteSlice.actions
+
+export default noteSlice.reducer
+```
+In its inner function, that is, in the asynchronous action, the operation first fetches all notes form the server and then dispatches the action to add the notes to the store. It is noteworth that redux automatically passes a reference to the `dispatch` method as an argument to the function, so the action creator `initializeNotes` does not require any parameters.
+
+The action creator `setNotes` is no longer exported outside the module, since the initial state of the notes will now be set using the asynchronous action creator `initializeNotes` we created. However, we still use the `setNotes` action creator within the module.
+
+We can now change our component to be:
+```javascript
+import { useEffect } from 'react'
+import { useDispatch } from 'react-redux'
+
+import NoteForm from './components/NoteForm'
+import Notes from './components/Notes'
+import VisibilityFilter from './components/VisibilityFilter'
+
+import { initializeNotes } from './reducers/noteReducer'
+
+const App = () => {
+  const dispatch = useDispatch()
+
+  useEffect(() => {
+
+    dispatch(initializeNotes())
+  }, [dispatch])
+
+  return (
+    <div>
+      <NoteForm />
+      <VisibilityFilter />
+      <Notes />
+    </div>
+  )
+}
+
+export default App
+```
+Now the initialization logic for the notes has been completely seperated from the react component. 
