@@ -732,3 +732,215 @@ const App = () => {
 export default App
 ```
 Now the initialization logic for the notes has been completely seperated from the react component. 
+
+# Managing data on the server with the react query library
+
+We will use the react query library to store and manage data retrieved from the server. The latest version of the library is called tanstack query. We can install the library with the following command:
+```
+npm install @tanstack/react-query
+```
+We need to make some changes to out `main.jsx` file to pass the library functions to the entire application:
+```javascript
+import { createRoot } from 'react-dom/client'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+
+import App from './App.jsx'
+
+const queryClient = new QueryClient()
+
+createRoot(document.getElementById('root')).render(
+  <QueryClientProvider client={queryClient}>
+    <App />
+  </QueryClientProvider>
+)
+```
+We will continue to use json-server to simulate the backend. We cab retrieve notes in the app component with the following code:
+```javascript
+import { useQuery } from '@tanstack/react-query'
+
+const App = () => {
+  const addNote = async (event) => {
+    event.preventDefault()
+    const content = event.target.note.value
+    event.target.note.value = ''
+    console.log(content)
+  }
+
+  const toggleImportance = (note) => {
+    console.log('toggle importance of', note.id)
+  }
+
+
+  const result = useQuery({
+    queryKey: ['notes'],
+    queryFn: async () => {
+      const response = await fetch('http://localhost:3001/notes')
+      if (!response.ok) {
+        throw new Error('Failed to fetch notes')
+      }
+      return await response.json()
+    }
+  })
+ 
+  console.log(JSON.parse(JSON.stringify(result)))
+ 
+  if (result.isLoading) {
+    return <div>loading data...</div>
+  }
+ 
+  const notes = result.data
+
+  return (
+    // ...
+  )
+}
+```
+Fetching data from the server is done using fethc API. However the method call is now wrapped into a query formed by the `useQuery` function. The call to `useQuery` takes as its parameter an object with the fields `queryKey` and `queryFn`. The value of the `queryKey` field is an array containing the string notes. It acts as the key for the defined query, i.e. the list of notes.
+
+The return value of the `useQuery` function is an object that indicates the status of the query. When the component is first rendered, the query is still in the loading state, i.e. the associated HTTP request is pending. At this stage the following loading data is rendered.
+
+However, the HTTP request is completed super quick that your able to see the loading data text. When the request is completed, the component is rendered again. The query is in the state success on the second rendering, and the field data of the query object contains the data returned by the request, i.e. the list of notes that is rendered on the screen.
+
+So the application retrieves data from the server and renders it on the screen without using the react hooks `useState` and `useEffect`. The data on the server is now entirely under the administration of the react qeury library, and the application does not need the state defined with reacts `useState` hook at all!
+
+We can move the function making the actual HTTP request to its own file `src/requests.js`:
+```javascript
+const baseUrl = 'http://localhost:3001/notes'
+
+export const getNotes = async () => {
+  const response = await fetch(baseUrl)
+  if (!response.ok) {
+    throw new Error('Failed to fetch notes')
+  }
+  return await response.json()
+}
+```
+We can now modify our app component to be more simplified:
+```javascript
+import { useQuery } from '@tanstack/react-query' 
+
+import { getNotes } from './requests'
+
+const App = () => {
+  // ...
+
+  const result = useQuery({
+    queryKey: ['notes'],
+
+    queryFn: getNotes
+  })
+
+  // ...
+}
+```
+
+# Synchronizing data to the server using react query
+
+Data is already successfully retrieved from the server. Next, we will make sure that the added and modified data is stored on the server. We can start by making a function `createNote` to the file `requests.js` for saving new notes:
+```javascript
+export const createNote = async (newNote) => {
+  const options = {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(newNote)
+  }
+ 
+  const response = await fetch(baseUrl, options)
+ 
+  if (!response.ok) {
+    throw new Error('Failed to create note')
+  }
+ 
+  return await response.json()
+}
+```
+The app component will change to:
+```javascript
+import { useQuery, useMutation } from '@tanstack/react-query'
+import { getNotes, createNote } from './requests'
+
+const App = () => {
+
+  const newNoteMutation = useMutation({
+    mutationFn: createNote,
+  })
+
+  const addNote = async (event) => {
+    event.preventDefault()
+    const content = event.target.note.value
+    event.target.note.value = ''
+
+    newNoteMutation.mutate({ content, important: true })
+  }
+
+  //
+
+}
+```
+To create a new note, a mutation is defined using the function `useMutation`. The parameter is the function we added to the file `requests.js`, which uses fetch API to send a new note to the server.
+
+The event handler `addNote` performs the mutation by calling the mutation objects function `mutate` and passing the new note as an argument. Our solution is good and the new note is saved on the server, however it is not updated to the screen. In order to render a new ntoe as well, we need to tell react query that the old result of the query whos key is the string notes should be invalidated.
+
+Invalidation is easy, it can be done by defining the appropriate `onSuccess` callback function to the mutation:
+```javascript
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { getNotes, createNote } from './requests'
+
+const App = () => {
+
+  const queryClient = useQueryClient()
+
+  const newNoteMutation = useMutation({
+    mutationFn: createNote,
+
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['notes'] })
+    },
+  })
+
+  // ...
+}
+```
+Now that the mutation has been successfully executed, a function call is made to
+```javascript
+queryClient.invalidateQueries({ queryKey: ['notes'] })
+```
+This in turn causes react query to automatically update a query with the key notes, i.e. fetch the notes from the server. As a results, the application renders the up to date state on the server.
+
+# Optimizing the performance
+
+The app works well and its easy to make changes to the list of notes. For example, when we want to change a notes field in the backend, invalidating the query `notes` is enough for the applciation data to be updated.
+
+The consequence of this, of course, is that after the PUT request that causes the note change, the application makes a new GET request to retrieve the query data from the server. If the amount of data retrieved by the application is not large, it doesn't really matter. But in some situations it might put a strain on the server. If necessary, it is possible to optimize performance by manually updating the query state maintained by react query.
+
+The change for the mutation adding a new note is as follows:
+```javascript
+const App = () => {
+  const queryClient = useQueryClient()
+
+  const newNoteMutation = useMutation({
+    mutationFn: createNote,
+
+    onSuccess: (newNote) => {
+      const notes = queryClient.getQueryData(['notes'])
+      queryClient.setQueryData(['notes'], notes.concat(newNote))
+    }
+  })
+
+  // ...
+}
+```
+On the `onSuccess` callback, the `queryClient` object first reads the existing notes state of the query and updates it by adding a new note, which is obtained as a parameter of the callback function. The value of the parameter is the value returned by the function `createNote`, defined in the file `requests.js`.
+
+Note that react query refetches all notes if you switch to another browser tab then back. By default react querys queries (whose status is stale) are updated when window focus changes. If we want, we can turn off the functionality by creating a query as follows:
+```javascript
+const App = () => {
+  // ...
+  const result = useQuery({
+    queryKey: ['notes'],
+    queryFn: getNotes,
+
+    refetchOnWindowFocus: false
+  })
+}
+```
