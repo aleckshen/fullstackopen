@@ -944,3 +944,245 @@ const App = () => {
   })
 }
 ```
+
+# useReducer
+
+If the application uses react query, some kind of solution is needed to manage the rest of the frontend state (for example, the state of forms). Quite often, the state created with `useState` is a sufficient solution. Using redux is of course possible, but there are other alternatives.
+
+We can implement a counter state management using a redux-like state management mechanism provided by reacts built in `useReducer` hook.
+```javascript
+import { useReducer } from 'react'
+
+const counterReducer = (state, action) => {
+  switch (action.type) {
+    case 'INC':
+      return state + 1
+    case 'DEC':
+      return state - 1
+    case 'ZERO':
+      return 0
+    default:
+      return state
+  }
+}
+
+const App = () => {
+  const [counter, counterDispatch] = useReducer(counterReducer, 0)
+
+  return (
+    <div>
+      <div>{counter}</div>
+      <div>
+        <button onClick={() => counterDispatch({ type: 'INC' })}>+</button>
+        <button onClick={() => counterDispatch({ type: 'DEC' })}>-</button>
+        <button onClick={() => counterDispatch({ type: 'ZERO' })}>0</button>
+      </div>
+    </div>
+  )
+}
+
+export default App
+```
+The hook `useReducer` provides a mechanism to create a state for an application. The parameter for creating a state is the reducer function that handles state change, and the initial value of the state.
+
+The reducer function that handles state changes is similar to reduxs reducers, i.e. the function gets as parameters the current state and the action that changes the state. The function returns the new state updated based on the type and possible contents of the action.
+
+The function `useReducer` returns an array that contains an element to access the current value of the state (first element of the array), and a dispatch function (second element of the array) to change state.
+
+# Passing state via props
+
+When the application is split into multiple components, the counter value and the dispatch function used to manage it must somehow be passed to other components as well. One solution is to pass these as props in the usual way.
+
+We can first create two components `Display` and `Button`. `Display` will display the counter and `Button` will handle dispatching the state.
+```javascript
+const Display = ({ counter }) => {
+  return <div>{counter}</div>
+}
+
+export default Display
+```
+```javascript
+const Button = ({ dispatch, type, label }) => {
+  return (
+    <button onClick={() => dispatch({ type })}>
+      {label}
+    </button>
+  )
+}
+
+export default Button
+```
+Our `App.jsx` will now look like this:
+```javascript
+import { useReducer } from 'react'
+
+
+import Button from './components/Button'
+import Display from './components/Display'
+
+const counterReducer = (state, action) => {
+  switch (action.type) {
+    case 'INC':
+      return state + 1
+    case 'DEC':
+      return state - 1
+    case 'ZERO':
+      return 0
+    default:
+      return state
+  }
+}
+
+const App = () => {
+  const [counter, counterDispatch] = useReducer(counterReducer, 0)
+
+  return (
+    <div>
+
+      <Display counter={counter} />
+      <div>
+
+        <Button dispatch={counterDispatch} type="INC" label="+" />
+        <Button dispatch={counterDispatch} type="DEC" label="-" />
+        <Button dispatch={counterDispatch} type="ZERO" label="0" />
+      </div>
+    </div>
+  )
+}
+```
+The application now has been split into multiple components. The state management is defined in the file `App.jsx`, from which values and functions needed for state management are passed to child component as props. The solution work, but is not optimal. If the component structure gets complicated, e.g. the dispatcher should be forwarded using props through many components to the components that need it, even thought the components in between do not need the dispatcher. This is called prop drilling.
+
+# Using context for passing the state to components
+
+Reacts built in `Context API` provides a solution for us. Reacts context is a kind of global state of the application, to which it is possible to give direct access to any component app. We can create a context in the previous application that stores the state management of the counter. The context is created with reacts hook `createContext`. We will create a context in the file `src/Counter.jsx`:
+```javascript
+import { createContext } from 'react'
+
+const CounterContext = createContext()
+
+export default CounterContext
+```
+The app component can now provide a context to its child component:
+```javascript
+import { useReducer } from 'react'
+
+import Button from './components/Button'
+import Display from './components/Display'
+
+import CounterContext from './CounterContext'
+
+// ...
+
+const App = () => {
+  const [counter, counterDispatch] = useReducer(counterReducer, 0)
+
+  return (
+
+    <CounterContext.Provider value={{ counter, counterDispatch }}>
+      <Display />
+      <div>
+
+        <Button type="INC" label="+" />
+        <Button type="DEC" label="-" />
+        <Button type="ZERO" label="0" />
+      </div>
+
+    </CounterContext.Provider>
+  )
+}
+```
+Providing the context is done by wrapping the child components inside the `CounterContext.Provider` component and setting a suitable value for the context. The context value is now an object with the attributes `counter` and `counterDispatch`. The `counter` field contains the counters value and `counterDispatch` contains the dispatch function used to change the value.
+
+Other components can now access the context using the `useContext` hook. The display component can changed to be like this:
+```javascript
+import { useContext } from 'react'
+import CounterContext from './CounterContext'
+
+
+const Display = () => {
+  const { counter } = useContext(CounterContext)
+
+  return <div>{counter}</div>
+}
+```
+Display component now no longer needs props, it obtains the counter value by calling the `useContext` hook with with the `CounterContext` object as its argument.
+
+Components now receive the value provided by the context provider. In this case the context is an object with a field counter that represents the counters value and a field `counterDispatch` that is the dispatch function used to change the counter state. Components access the attributes they need using javascripts destructuring syntax:
+```javascript
+const { counter } = useContext(CounterContext)
+```
+
+# Defining counter context in a seperate file
+
+Our application current has an annoying feature. The functionality of the counter state management is partly defined in the app component. We can move everything to `CounterContext.jsx`:
+```javascript
+import { createContext, useReducer } from 'react'
+
+const counterReducer = (state, action) => {
+  switch (action.type) {
+    case 'INC':
+      return state + 1
+    case 'DEC':
+      return state - 1
+    case 'ZERO':
+      return 0
+    default:
+      return state
+  }
+}
+
+const CounterContext = createContext()
+
+export const CounterContextProvider = (props) => {
+  const [counter, counterDispatch] = useReducer(counterReducer, 0)
+
+  return (
+    <CounterContext.Provider value={{ counter, counterDispatch }}>
+      {props.children}
+    </CounterContext.Provider>
+  )
+}
+
+export default CounterContext
+```
+The file now exports, in addition to the `CounterContext` object corresponding to the context, the `CounterContextProvider` component, which is practically a context provider whos value is a counter and a dispatcher used for its state management.
+
+We enable the context provider with the following changes in our `main.jsx`:
+```javascript
+import { StrictMode } from 'react'
+import { createRoot } from 'react-dom/client'
+
+import App from './App'
+
+import { CounterContextProvider } from './CounterContext'
+
+createRoot(document.getElementById('root')).render(
+  <StrictMode>
+
+    <CounterContextProvider>
+      <App />
+
+    </CounterContextProvider>
+  </StrictMode>
+)
+```
+Now the context defining the value and functionality of the counter is available to all components of the application. We will also simplify our app component to the following:
+```javascript
+import Button from './components/Button'
+import Display from './components/Display'
+
+const App = () => {
+  return (
+    <div>
+      <Display />
+      <div>
+        <Button type="INC" label="+" />
+        <Button type="DEC" label="-" />
+        <Button type="ZERO" label="0" />
+      </div>
+    </div>
+  )
+}
+
+export default App
+```
