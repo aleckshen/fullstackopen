@@ -174,3 +174,64 @@ Everytime the component is rendered (evertime the browsers URL changes), the fol
 const match = useMatch('/notes/:id')
 ```
 If the URL matches `/notes/:id`, the match variable will contain an object which we can access the parameterized part of the path, the id of the note to be displayed, and we can fetch the correct note to display.
+
+# Hooks and custom hooks
+
+Some genral rules of react hooks are to never call hooks inside loops, conditions, or nested functions. Instead, always use hooks at the top level of your react function.
+
+You can only call hooks while react is rendering a function component:
+- Call them at the top level in the body of a function component.
+- Call them at the top level in the body of a custom hook.
+
+React offers the option to create custom hooks. According to react, the primary purpose of custom hooks is to facilitate the reuse of the logic used in components. Building your own hooks lets you extract component logic into reusable function.
+
+Custom hooks are regular javascript functions that can use any other hooks, as long as they adhere to the rules of hooks. Additionally, the name of custom hooks must start with the word `use`.
+
+For example we could create a custom hook for incrementing a counter.
+```javascript
+const useCounter = () => {
+  const [value, setValue] = useState(0)
+
+  const increase = () => {
+    setValue(value + 1)
+  }
+
+  const decrease = () => {
+    setValue(value - 1)
+  }
+
+  const zero = () => {
+    setValue(0)
+  }
+
+  return {
+    value, 
+    increase,
+    decrease,
+    zero
+  }
+}
+```
+The custom hook uses the `useState` hook internally to create its state. The hook returns an object, the properties of which include the value of the counter as well as functions for manipulating the value.
+
+We can use the following custom hook like so:
+```javascript
+const App = () => {
+  const counter = useCounter()
+
+  return (
+    <div>
+      <div>{counter.value}</div>
+      <button onClick={counter.increase}>
+        plus
+      </button>
+      <button onClick={counter.decrease}>
+        minus
+      </button>      
+      <button onClick={counter.zero}>
+        zero
+      </button>
+    </div>
+  )
+}
+```
