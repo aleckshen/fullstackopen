@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useSelector, useDispatch } from 'react-redux'
 import { setNotification } from '../reducers/notificationReducer'
-import { setUser } from '../reducers/userReducer'
+import { setCurrentUser } from '../reducers/userReducer'
 
 import blogService from '../services/blogs'
 import loginService from '../services/login'
@@ -13,7 +13,7 @@ const LoginForm = () => {
 
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
-  const user = useSelector(state => state.user)
+  const user = useSelector(state => state.users.currentUser)
   const notification = useSelector(state => state.notification)
 
   const handleLogin = async event => {
@@ -26,7 +26,7 @@ const LoginForm = () => {
       )
 
       blogService.setToken(user.token)
-      dispatch(setUser(user))
+      dispatch(setCurrentUser(user))
       setUsername('')
       setPassword('')
     } catch (error) {

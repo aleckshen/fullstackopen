@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { useDispatch, useSelector } from 'react-redux'
 import { setNotification } from '../reducers/notificationReducer'
 import { createBlog as createBlogAction, likeBlog as likeBlogAction, deleteBlog as deleteBlogAction } from '../reducers/blogReducer'
-import { setUser } from '../reducers/userReducer'
+import { setCurrentUser } from '../reducers/userReducer'
 
 import Togglable from './Togglable'
 import Notification from './Notification'
@@ -16,7 +16,7 @@ const BlogForm = () => {
   const [url, setUrl] = useState('')
   const blogs = useSelector(state => state.blogs)
   const notification = useSelector(state => state.notification)
-  const user = useSelector(state => state.user)
+  const user = useSelector(state => state.users.currentUser)
 
   const createBlog = async blog => {
     try {
@@ -51,11 +51,6 @@ const BlogForm = () => {
     setUrl('')
   }
 
-  const handleLogout = () => {
-    window.localStorage.removeItem('loggedUser')
-    dispatch(setUser(null))
-  }
-
   if (!user) {
     return null
   }
@@ -65,7 +60,6 @@ const BlogForm = () => {
       <h2>blogs</h2>
       <Notification message={notification} />
       <p>{user?.name} logged in</p>
-      <button onClick={handleLogout}>logout</button>
       <Togglable buttonLabel="create new blog">
         <div>
           <h2>create new</h2>
