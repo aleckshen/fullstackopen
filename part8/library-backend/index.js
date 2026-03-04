@@ -95,10 +95,31 @@ const typeDefs = `
     genres: [String!]!
   }
 
+  type Author {
+    name: String!
+    id: ID!
+    born: Int
+    bookCount: Int!
+  }
+
   type Query {
     bookCount: Int!
     authorCount: Int!
-    allBooks: [Book!]!
+    allBooks(author: String, genre: String): [Book!]!
+    allAuthors: [Author!]!
+  }
+
+  type Mutation {
+    addBook(
+      title: String!
+      author: String!
+      published: Int!
+      genres: [String!]!
+    ): Book!
+    editAuthor(
+      name: String!
+      setBornTo: Int! 
+    ): Author
   }
 `
 
@@ -106,7 +127,71 @@ const resolvers = {
   Query: {
     bookCount: () => books.length,
     authorCount: () => authors.length,
-    allBooks: () => books
+    allBooks: (root, args) => {
+      const { author, genre } = args
+
+      let filteredBooks = books
+
+      if (author) {
+        filteredBooks = filteredBooks.filter(
+          book => book.author === author
+        )
+      }
+
+      if (genre) {
+        filteredBooks = filteredBooks.filter(
+          book => book.genres.includes(genre)
+        )
+      }
+
+      return filteredBooks
+    },
+    allAuthors: () => authors
+  },
+
+  Author: {
+    bookCount: (root) => {
+      return books.filter(book => book.author === root.name).length
+    }
+  },
+
+  Mutation: {
+    addBook: (root, args) => {
+      const authorExists = authors.find(a => a.name === args.author)
+
+      if (!authorExists) {
+        const newAuthor = {
+          name: args.author,
+          id: uuid(),
+          born: null
+        }
+
+        authors = authors.concat(newAuthor)
+      }
+
+      const book = { ...args, id: uuid() }
+      books = books.concat(book)
+      return book
+    },
+
+    editAuthor: (root, args) => {
+      const author = authors.find(a => a.name === args.name)
+
+      if (!author) {
+        return null
+      }
+
+      const updatedAuthor = {
+        ...author,
+        born: args.setBornTo
+      }
+
+      authors = authors.map(a =>
+        a.name === args.name ? updatedAuthor : a
+      )
+
+      return updatedAuthor
+    }
   }
 }
 
