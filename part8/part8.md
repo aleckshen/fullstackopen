@@ -402,3 +402,509 @@ query {
   }
 }
 ```
+
+# Sending graphQL queries
+
+We will implement a react app that uses the graphQL server we created. In theory, we could use graphQL with HTTP POST requests. For example we could send a POST request with the body:
+```
+{
+  "query": "query { allPersons{ name } }"
+}
+```
+The communication works by sending HTTP POST requests to `http://localhost:4000/graphql`. The query itself is a string sent as the value of the key query. We could take care of the communication between the react app and graphQL by using axios. However, most of the time, it is not sensible to do so. It is a better idea to use a higher-order library capable of abstracting the unncessary details of the communication.
+
+At the moment, there are two good: Relay Facebook and Apollo Client, which is the client side of the same library we used in the previous section. Apollo is absolutely the most popular of the two, and we will use it in this section as well.
+
+# Apollo client
+
+We can create a new react app and install apollo client with the following command:
+```
+npm install @apollo/client graphql
+```
+We will replace the default contents of the file `main.jsx` with the following program skeleton:
+```javascript
+import { StrictMode } from 'react'
+import { createRoot } from 'react-dom/client'
+import App from './App.jsx'
+
+import { ApolloClient, gql, HttpLink, InMemoryCache } from '@apollo/client'
+
+const client = new ApolloClient({
+  link: new HttpLink({
+    uri: 'http://localhost:4000',
+  }),
+  cache: new InMemoryCache(),
+})
+
+const query = gql`
+  query {
+    allPersons {
+      name
+      phone
+      address {
+        street
+        city
+      }
+      id
+    }
+  }
+`
+
+client.query({ query }).then((response) => {
+  console.log(response.data)
+})
+
+createRoot(document.getElementById('root')).render(
+  <StrictMode>
+    <App />
+  </StrictMode>,
+)
+```
+The beginning of the code creates a new client object, which is then used to send a query to the server:
+```javascript
+client.query({ query }).then((response) => {
+  console.log(response.data)
+})
+```
+The application can communicate with a graphQL server using the `client` object. The client can be made accessible for all components of the application by wrapping the `App` component with `ApolloProvider`:
+```javascript
+import { ApolloProvider } from '@apollo/client/react'
+
+const client = new ApolloClient({
+  link: new HttpLink({
+    uri: 'http://localhost:4000',
+  }),
+  cache: new InMemoryCache(),
+})
+
+// ...
+
+createRoot(document.getElementById('root')).render(
+  <StrictMode>
+    <ApolloProvider client={client}>
+      <App />
+    </ApolloProvider>
+  </StrictMode>,
+)
+```
+
+# Making queries
+
+We can now implement the main view of the application, which shows a list of person's name and phone number. Apollo client offers a few alternative for making queries. Currently, the use of the hook function `useQeury` is the dominant practice.
+
+The query is made by the app component, the code of which is as follows:
+```javascript
+import { gql } from '@apollo/client'
+import { useQuery } from '@apollo/client/react'
+
+const ALL_PERSONS = gql`
+  query {
+    allPersons {
+      name
+      phone
+      id
+    }
+  }
+`
+
+const App = () => {
+  const result = useQuery(ALL_PERSONS)
+
+  if (result.loading) {
+    return <div>loading...</div>
+  }
+
+  return (
+    <div>
+      {result.data.allPersons.map(p => p.name).join(', ')}
+    </div>
+  )
+}
+
+export default App
+```
+When called, `useQuery` makes the query it receives as a parameter. It returns an object with multiple fields. The field `loading` is true if the query has not received a response yet. When a response is receivedd, the result of the `allPersons` query can be found in the data field, and we can render the list of names to the screen with the map function.
+
+# Named queries and variables
+
+We can implement functionality for viewing the adress details of a person. The `findPerson` query is well-suited for this. The queries we did in the last chapter had the parameter hardcoded into the query:
+```javascript
+query {
+  findPerson(name: "Arto Hellas") {
+    phone 
+    city 
+    street
+    id
+  }
+}
+```
+When we do queries programmatically, we must be able to give them parameters dynamically. GraphQL variables are well-suited fpr this. TO be able to use variables, we must also name our queries. A good format for the query is this:
+```javascript
+query findPersonByName($nameToSearch: String!) {
+  findPerson(name: $nameToSearch) {
+    name
+    phone 
+    address {
+      street
+      city
+    }
+  }
+}
+```
+The name of the query is `findPersonByName`, and it is given a string `$nameToSearch` as a parameter. It is also possible to do queries with parameters with the apollo explorer. The parameters are given in `Variables`.
+
+The `useQuery` hook is well-suited for situations where the query is done when the compoennt is rendered. However, we now want to make the query only when a user wants to see the details of a specific person, so the query is done only as required.
+
+One possibility for this kind of situation is the hook function `useLazyQuery` that would make it possible to define a query which is executed when the user wants to see the detailed information of a person. However, in our case we can stick to `useQuery` and use the option skip, which makes it possible to do the query only if a set condition is true.
+
+With the use of the skip option we can have the following code:
+```javascript
+const result = useQuery(FIND_PERSON, {
+  variables: { nameToSearch },
+
+  skip: !nameToSearch,
+})
+```
+When the user is not interested in seeing the detailed info of any person, the state variable `nameToSearch` is null and the query is not executed.
+
+# Cache
+
+When we do multiple queires, for example with the adress details of Arto Hellas, we notice something interesting: the query to the backend is done only the first time around. After this, despite the same qeury being done again by the code, the qeury is not sent to the backend.
+
+Apollo client saves the response of queries to cache. To optimize performance if the response to a query is already in the cache, the query is not sent to the server at all.
+
+# Doing mutations
+
+In the previous chapter, we hardcoded the parameters for mutations. Now, we need a version of the addPerson mutation which uses variables:
+```javascript
+const CREATE_PERSON = gql`
+  mutation createPerson(
+    $name: String!
+    $street: String!
+    $city: String!
+    $phone: String
+  ) {
+    addPerson(name: $name, street: $street, city: $city, phone: $phone) {
+      name
+      phone
+      id
+      address {
+        street
+        city
+      }
+    }
+  }
+`
+```
+The hook function `useMutation` provides the functionality for making mutations. We can create a new component `PersonForm` for adding a new person to the application. The contents of the file `src/components/PersonForm.jsx` are as follows:
+```javascript
+import { useState } from 'react'
+import { gql } from '@apollo/client'
+import { useMutation } from '@apollo/client/react'
+
+const CREATE_PERSON = gql`
+  mutation createPerson(
+    $name: String!
+    $street: String!
+    $city: String!
+    $phone: String
+  ) {
+    addPerson(name: $name, street: $street, city: $city, phone: $phone) {
+      name
+      phone
+      id
+      address {
+        street
+        city
+      }
+    }
+  }
+`
+
+const PersonForm = () => {
+  const [name, setName] = useState('')
+  const [phone, setPhone] = useState('')
+  const [street, setStreet] = useState('')
+  const [city, setCity] = useState('')
+
+
+  const [createPerson] = useMutation(CREATE_PERSON)
+
+  const submit = (event) => {
+    event.preventDefault()
+
+
+    createPerson({ variables: { name, phone, street, city } })
+
+    setName('')
+    setPhone('')
+    setStreet('')
+    setCity('')
+  }
+
+  return (
+    <div>
+      <h2>create new</h2>
+      <form onSubmit={submit}>
+        <div>
+          name <input value={name}
+            onChange={({ target }) => setName(target.value)}
+          />
+        </div>
+        <div>
+          phone <input value={phone}
+            onChange={({ target }) => setPhone(target.value)}
+          />
+        </div>
+        <div>
+          street <input value={street}
+            onChange={({ target }) => setStreet(target.value)}
+          />
+        </div>
+        <div>
+          city <input value={city}
+            onChange={({ target }) => setCity(target.value)}
+          />
+        </div>
+        <button type='submit'>add!</button>
+      </form>
+    </div>
+  )
+}
+
+export default PersonForm
+```
+We can define mutatio functions using the `useMutation` hook. The hook returns an array, the first element of which contains the function to cause the mutation.
+```javascript
+const [createPerson] = useMutation(CREATE_PERSON)
+```
+The query variables receive values when the query is made:
+```javascript
+createPerson({ variables: { name, phone, street, city } })
+```
+New persons are added just fine, but the screen is not updated. This is because apollo client cannot automatically update the cache of an application, so it still contains the state from before the mutation. We could update the screen by reloading the page, as the cahse is emptied when the page is reloaded. However, there must be a better way to do this.
+
+# Updating the cache
+
+There are a few different solutions for this. One way is to make the query for all persons poll the server, or make the query repeadtedly. The change is small. Lets set the query to poll every two seconds.
+```javascript
+const App = () => {
+  const result = useQuery(ALL_PERSONS, {
+
+    pollInterval: 2000
+  })
+
+  if (result.loading)  {
+    return <div>loading...</div>
+  }
+
+  return (
+    <div>
+      <Persons persons = {result.data.allPersons}/>
+      <PersonForm />
+    </div>
+  )
+}
+
+export default App
+```
+The solution is simple, and every time a user adds a new person, it appears immediately on the screen of all users. The downside of polling is, of course, the unnecessary network traffic it causes. In addition, the page may start to flicker, since the component is re-rendered with each query update and `result.loading` is true for a breif moment so a `loading...` text flashes on the screen for an instant.
+
+Another easy way to keep the cache in sync is to use the `useMutation` hooks `refetchQueries` parameter to define that the query fetching all persons is done again whenever a new person is created.
+```javascript
+// ...
+
+
+const ALL_PERSONS = gql`
+  query {
+    allPersons {
+      name
+      phone
+      id
+    }
+  }
+`
+
+
+const PersonForm = () => {
+  const [name, setName] = useState('')
+  const [phone, setPhone] = useState('')
+  const [street, setStreet] = useState('')
+  const [city, setCity] = useState('')
+
+
+  const [createPerson] = useMutation(CREATE_PERSON, {
+    refetchQueries: [{ query: ALL_PERSONS }],
+  })
+
+  // ...
+}
+```
+The pros and cons of this solution are almost oppoisite of the previous one. THere is no extra web traffic because queries are not done just in case. However, if one user now updates the state of the server, the changes do not show to other users immediately. If you want to do multiple queries, you can pass multiple objects inside refetchQueries. This will allow you to update different parts of your app at the same time, for example:
+```javascript
+const [createPerson] = useMutation(CREATE_PERSON, {
+  refetchQueries: [
+    { query: ALL_PERSONS },
+    { query: OTHER_QUERY },
+    { query: ANOTHER_QUERY },
+  ], // pass as many queries as you need
+})
+```
+
+# Handling mutation errors
+
+If we try to create an invalid person, for example by using a name that already exists in the application, nothing happens. The person is not added to the application, but we alos do not receive any error message.
+
+Earlier, we defined a check on the server that prevents adding another person with the same name and throws and error in such situation. However, if the error is not yet handled in the frontend. Using the `onError` option of the `useMutation` hook, it is possible to register an error handler function for mutations.
+
+We can register an error handler for the mutation. The `PersonForm` component receives a `setError` fuinction as a prop, which is used to set a message indicating the error:
+```javascript
+const PersonForm = ({ setError }) => {
+  // ... 
+
+  const [ createPerson ] = useMutation(CREATE_PERSON, {
+    refetchQueries: [  {query: ALL_PERSONS } ],
+
+    onError: (error) => setError(error.message),
+  })
+
+  // ...
+}
+```
+We also need to create a seperate component for the notification in the file `src/components/Notify.jsx`:
+```javascript
+const Notify = ({ errorMessage }) => {
+  if (!errorMessage) {
+    return null
+  }
+  return (
+    <div style={{ color: 'red' }}>
+      {errorMessage}
+    </div>
+  )
+}
+
+export default Notify
+```
+The component receives a possible error message as a prop. If an error message is set, it is rendered on the screen. We can render the `Notify` component that displays the error message in the file `App.jsx`:
+```javascript
+import Notify from './components/Notify'
+
+// ... 
+
+const App = () => {
+
+  const [errorMessage, setErrorMessage] = useState(null)
+
+  const result = useQuery(ALL_PERSONS)
+
+  if (result.loading)  {
+    return <div>loading...</div>
+  }
+
+
+  const notify = (message) => {
+    setErrorMessage(message)
+    setTimeout(() => {
+      setErrorMessage(null)
+    }, 10000)
+  }
+
+  return (
+    <div>
+
+      <Notify errorMessage={errorMessage} />
+      <Persons persons = {result.data.allPersons} />
+
+      <PersonForm setError={notify} />
+    </div>
+  )
+}
+```
+
+# Updating a phone number
+
+We also want to be able to update phone numbers in our application. The solution is almost identical to the one we used for adding new persons. The mutation again requires the use of variables. We can update our queries.js file with the following query:
+```javasciprt
+export const EDIT_NUMBER = gql`
+  mutation editNumber($name: String!, $phone: String!) {
+    editNumber(name: $name, phone: $phone) {
+      name
+      phone
+      address {
+        street
+        city
+      }
+      id
+    }
+  }
+`
+```
+We can create a new component `PhoneForm` that allows us to update the phone number:
+```javascript
+import { useState } from 'react'
+import { useMutation } from '@apollo/client/react'
+import { EDIT_NUMBER } from '../queries'
+
+const PhoneForm = () => {
+  const [name, setName] = useState('')
+  const [phone, setPhone] = useState('')
+
+
+  const [ changeNumber ] = useMutation(EDIT_NUMBER)
+
+  const submit = (event) => {
+    event.preventDefault()
+
+
+    changeNumber({ variables: { name, phone } })
+
+    setName('')
+    setPhone('')
+  }
+
+  return (
+    <div>
+      <h2>change number</h2>
+
+      <form onSubmit={submit}>
+        <div>
+          name <input
+            value={name}
+            onChange={({ target }) => setName(target.value)}
+          />
+        </div>
+        <div>
+          phone <input
+            value={phone}
+            onChange={({ target }) => setPhone(target.value)}
+          />
+        </div>
+        <button type='submit'>change number</button>
+      </form>
+    </div>
+  )
+}
+
+export default PhoneForm
+```
+Suprisingly, when a persons number is changed, the new number automatically appears on the list of persons rendered by the `Persons` component. This happens because each person has an identifying field of type ID, so the persons details saved to the cache update automatically when they are changed with the mutation.
+
+Our application still has a small flaw, if we try to change the number of a person who doesnt exist, nothing happens. Since this isn't considered an error state from graphQLs point of view, registering an `onError` error handler wouldnt be useful in this situation. However, we can add an `onCompleted` callback to the `useMutation` hook, where we can generate a potential error message:
+```javascript
+const PhoneForm = ({ setError }) => {
+  const [name, setName] = useState('')
+  const [phone, setPhone] = useState('')
+
+
+  const [changeNumber] = useMutation(EDIT_NUMBER, {
+    onCompleted: (data) => {
+      if (!data.editNumber) {
+        setError('person not found')
+      }
+    }
+  })
+
+  // ...
+}
+```
