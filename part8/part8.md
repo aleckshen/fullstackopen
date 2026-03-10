@@ -908,3 +908,579 @@ const PhoneForm = ({ setError }) => {
   // ...
 }
 ```
+
+# Refactoring the backend
+
+So far we've written all the code in the `index.js` files. As the application grows, this is no longer sensible. Its also good programming practicet so separate different responsibilities of the application into their own modules. We can refactor our backend by splitting it into multiple files, we will start by extracting the applications typeDefs into a file called `schema.js`.
+
+Next we will move the code responsible for the resolvers into its own module, `resolvers.js`. For simplicity the persons array holding the people data is now placed in the same file as the resolvers. This array will soon be removed when we switch to using a database for storing data.
+
+Finally we will move the code responsible for starting the apollo server into its own file `server.js`.
+```javascript
+const { ApolloServer } = require('@apollo/server')
+const { startStandaloneServer } = require('@apollo/server/standalone')
+
+const resolvers = require('./resolvers')
+const schema = require('./schema')
+
+const startServer = (port) => {
+  const server = new ApolloServer({
+    typeDefs,
+    resolvers,
+  })
+
+  startStandaloneServer(server, {
+    listen: { port: port },
+  }).then(({ url }) => {
+    console.log(`Server ready at ${url}`)
+  })
+}
+
+module.exports = startServer
+```
+Starting the apollo server is now handled inside the `startServer` function we defined ourselves. We can export the function and start the server from outside the module, from the `index.js` file. The function takes as a parameter the port that apollo server will listen on.
+
+We can install dotevn library so that we can define environment variables in a `.env` file:
+```
+npm install dotenv
+```
+Now our `index.js` file will look like this:
+```javascript
+const { ApolloServer } = require('@apollo/server')
+const { startStandaloneServer } = require('@apollo/server/standalone')
+
+const resolvers = require('./resolvers')
+const schema = require('./schema')
+
+const startServer = (port) => {
+  const server = new ApolloServer({
+    typeDefs,
+    resolvers,
+  })
+
+  startStandaloneServer(server, {
+    listen: { port: port },
+  }).then(({ url }) => {
+    console.log(`Server ready at ${url}`)
+  })
+}
+
+module.exports = startServer
+```
+
+# Mongoose and apollo
+
+We will now start using a mongoDB database in our application. We will introduce the database by following the approach used in parts 3 and 4 earlier. We will first install mongoose:
+```
+npm install mongoose
+```
+We can define the schema in the file `models/person.js` as follows:
+```javascript
+const mongoose = require('mongoose')
+
+const schema = new mongoose.Schema({
+  name: {
+    type: String,
+    required: true,
+    minlength: 5
+  },
+  phone: {
+    type: String,
+    minlength: 5
+  },
+  street: {
+    type: String,
+    required: true,
+    minlength: 5
+  },
+  city: {
+    type: String,
+    required: true,
+    minlength: 3
+  },
+})
+
+module.exports = mongoose.model('Person', schema)
+```
+We also included a few validations. `required = ture`, which makes sure that a value exists, is actually redundant, we already ensure that the fields exist with graphQL. However, it is good to also keep validation in the database.
+
+We can create a seperate module `db.js` for the code that establishes the database connection:
+```javascript
+const mongoose = require('mongoose')
+
+const connectToDatabase = async (uri) => {
+  console.log('connecting to database URI:', uri)
+
+  try {
+    await mongoose.connect(uri)
+    console.log('connected to MongoDB')
+  } catch (error) {
+    console.log('error connection to MongoDB:', error.message)
+    process.exit(1)
+  }
+}
+
+module.exports = connectToDatabase
+```
+The module defines the function `connectToDatabase`, which receives the database URI as a parameter and takes care of connecting to the database. We can now use this module in the `index.js` file.
+```javascript
+require('dotenv').config()
+
+
+const connectToDatabase = require('./db')
+const startServer = require('./server')
+
+
+const MONGODB_URI = process.env.MONGODB_URI
+const PORT = process.env.PORT || 4000
+
+
+const main = async () => {
+  await connectToDatabase(MONGODB_URI)
+  startServer(PORT)
+}
+
+main()
+```
+Because the async/await syntax can only be used inside functions, we now define a simple `main` function that handles starting the application. This allows us to call the function that creates the database connection using the `await` keyword.
+
+The value of the `MONGODB_URI` os obtained from an environment variable, so we need to add an appropriate value for in the `.env` file. The application first calls the function that creates the database connection, and once the database connection has been established, it starts the graphQL server.
+
+The content of `resolver.js`, which is responsible for the application logic, will change almost completely. We can get the application to work largely by mkaing the following changes:
+```javascript
+const { GraphQLError } = require('graphql')
+const Person = require('./models/person')
+
+const resolvers = {
+  Query: {
+    personCount: async () => Person.collection.countDocuments(),
+    allPersons: async (root, args) => {
+      // filters missing
+      return Person.find({})
+    },
+    findPerson: async (root, args) => Person.findOne({ name: args.name }),
+  },
+  Person: {
+    address: ({ street, city }) => {
+      return {
+        street,
+        city,
+      }
+    },
+  },
+  Mutation: {
+    addPerson: async (root, args) => {
+      const nameExists = await Person.exists({ name: args.name })
+
+      if (nameExists) {
+        throw new GraphQLError(`Name must be unique: ${args.name}`, {
+          extensions: {
+            code: 'BAD_USER_INPUT',
+            invalidArgs: args.name,
+          },
+        })
+      }
+
+      const person = new Person({ ...args })
+      return person.save()
+    },
+    editNumber: async (root, args) => {
+      const person = await Person.findOne({ name: args.name })
+
+      if (!person) {
+        return null
+      }
+
+                  person.phone = args.phone
+      return person.save()
+    },
+  },
+}
+
+module.exports = resolvers
+```
+The changes are pretty straight forward. There are a few noteworthy things. As we remember, in Mongo, the identifying field of an object is called `_id` and we previously had to parse the name of the field to `id` ourselves. Now graphQL can do this automatically.
+
+Another noteworthy thing is that the resolver function now returns a promise, when they previously returned normal objects. When a resolver returns a promise, apollo server sends back the value which to the promise resolves to.
+
+For example, if the following resolver function is executed,
+```javascript
+allPersons: async (root, args) => {
+  return Person.find({})
+},
+```
+Apollo server waits for the promise to resolve, and returns the result. So apollo works roughly like this:
+```javascript
+allPersons: async (root, args) => {
+  const result = await Person.find({})
+  return result
+}
+```
+We can complete the `allPersons` resolver so it takes the optional parameter `phone` into account:
+```javascript
+Query: {
+  // ..
+  allPersons: async (root, args) => {
+    if (!args.phone) {
+      return Person.find({})
+    }
+
+    return Person.find({ phone: { $exists: args.phone === 'YES' } })
+  },
+},
+```
+If the query has not been given a parameter `phone`, all persons are returned. If the parameter has the value `YES`, the result of the query
+```javascript
+Person.find({ phone: { $exists: true }})
+```
+is returned, so the objects in which the fieldn `phone` has a value.
+If the parameter has the value `NO`, the query returns the objects in which `phone` field has no value:
+```javascript
+Person.find({ phone: { $exists: false }})
+```
+
+# Validation
+
+As well as in graphQL, the input is now validated using the validations defined in the mongoose schema. For handling possible validation errors in the schema, we must add an error-handling `try/catch` block to the `save` method. When we end up in the catch, we throw an exceptioj `GraphQLError` with error code:
+```javascript
+Mutation: {
+  addPerson: async (root, args) => {
+      const nameExists = await Person.exists({ name: args.name })
+
+      if (nameExists) {
+        throw new GraphQLError(`Name must be unique: ${args.name}`, {
+          extensions: {
+            code: 'BAD_USER_INPUT',
+            invalidArgs: args.name,
+          },
+        })
+      }
+
+      const person = new Person({ ...args })
+
+
+      try {
+        await person.save()
+      } catch (error) {
+        throw new GraphQLError(`Saving person failed: ${error.message}`, {
+          extensions: {
+            code: 'BAD_USER_INPUT',
+            invalidArgs: args.name,
+            error
+          }
+        })
+      }
+ 
+      return person
+  },
+    editNumber: async (root, args) => {
+      const person = await Person.findOne({ name: args.name })
+
+      if (!person) {
+        return null
+      }
+
+      person.phone = args.phone
+
+
+      try {
+        await person.save()
+      } catch (error) {
+        throw new GraphQLError(`Saving number failed: ${error.message}`, {
+          extensions: {
+            code: 'BAD_USER_INPUT',
+            invalidArgs: args.name,
+            error
+          }
+        })
+      }
+ 
+      return person
+    }
+}
+```
+We have also added the mongoose error and the data that caused the error to the extensions object that is used to convey more info about the cause of the error to the caller. The frontend can then display this information to the user, who can try the operation again with a better input.
+
+# User and log in
+
+Let's add user management to our application. For simplicity's sake, let's assume that all users have the same password which is hardcoded to the system. It would be straightforward to save individual passwords for all users following the principles from part 4, but because our focus is on GraphQL, we will leave out all that extra hassle this time. We can create the user schema in the file `models/user.js`:
+```javascript
+const mongoose = require('mongoose')
+
+const schema = new mongoose.Schema({
+  username: {
+    type: String,
+    required: true,
+    minlength: 3
+  },
+  friends: [
+    {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Person'
+    }
+  ],
+})
+
+module.exports = mongoose.model('User', schema)
+```
+Every user is connected to a bunch of other persons in the system through the `friends` field. The idea is that when a user, e.g. `mluukai`, adds a person, e.g. `Arto Hellas`, to the list, the person is added to their `friends` list. This way, logged-in users can have their own personalized view in the application.
+
+Logging in and identifying the user are handled the same way we used in part4 when we used REST, by using tokens. We can extend the graphQL schema like so:
+```javascript
+type User {
+  username: String!
+  friends: [Person!]!
+  id: ID!
+}
+
+type Token {
+  value: String!
+}
+
+type Query {
+  // ..
+  me: User
+}
+
+type Mutation {
+  // ...
+  createUser(username: String!): User
+  login(username: String!, password: String!): Token
+}
+```
+The query `me` returns the currently logged-in user. New users are created the `createUser` mutation, and loggin in happens with the `login` mutation. Lets install the jsonwebtoken library:
+```
+npm install jsonwebtoken
+```
+The resolvers of the new mutations are as follows:
+```javascript
+const jwt = require('jsonwebtoken')
+const User = require('./models/user')
+
+Mutation: {
+  // ..
+  createUser: async (root, args) => {
+    const user = new User({ username: args.username })
+
+    return user.save()
+      .catch(error => {
+        throw new GraphQLError(`Creating the user failed: ${error.message}`, {
+          extensions: {
+            code: 'BAD_USER_INPUT',
+            invalidArgs: args.username,
+            error
+          }
+        })
+      })
+  },
+  login: async (root, args) => {
+    const user = await User.findOne({ username: args.username })
+
+    if ( !user || args.password !== 'secret' ) {
+      throw new GraphQLError('wrong credentials', {
+        extensions: {
+          code: 'BAD_USER_INPUT'
+        }
+      })        
+    }
+
+    const userForToken = {
+      username: user.username,
+      id: user._id,
+    }
+
+    return { value: jwt.sign(userForToken, process.env.JWT_SECRET) }
+  },
+},
+```
+The new user mutation is pretty straight forward. The login mutation check if the usernamne/password pair is valid. And if it is indeed valid, it returns a jswt token familiar from part4. Note that the `JWT_SECRET` must be defined in the `.env` file.
+
+User creation is done now as follows:
+```javascript
+mutation {
+  createUser (
+    username: "mluukkai"
+  ) {
+    username
+    id
+  }
+}
+```
+The mutation for logging in looks like this:
+```javascript
+mutation {
+  login (
+    username: "mluukkai"
+    password: "secret"
+  ) {
+    value
+  }
+}
+```
+Just like in the previous case with REST, the idea now is that a logged-in user adds a token they receive upon login to all their requests. And just like with REST, the token is added to graphQL queries using the authorization header.
+
+On the backend, the most convenient way to pass the token that arrives with the request to the resolvers is to use apollo servers context. With the context, we can perform thing that are common to all queries and mutations, for example identifying the user associated with the request.
+
+We can change the backend startup so that the object passed as the second parameter to the `startStandaloneServer` function inlcudes a context field, and we can create a helper function `getUserFromAuthHeader` to verify the validity of the token and to find the user from the database:
+```javascript
+const { ApolloServer } = require('@apollo/server')
+const { startStandaloneServer } = require('@apollo/server/standalone')
+
+const jwt = require('jsonwebtoken')
+
+const resolvers = require('./resolvers')
+const typeDefs = require('./schema')
+
+const User = require('./models/user')
+
+
+const getUserFromAuthHeader = async (auth) => {
+  if (!auth || !auth.startsWith('Bearer ')) {
+    return null
+  }
+ 
+  const decodedToken = jwt.verify(auth.substring(7), process.env.JWT_SECRET)
+  return User.findById(decodedToken.id).populate('friends')
+}
+
+const startServer = (port) => {
+  const server = new ApolloServer({
+    typeDefs,
+    resolvers,
+  })
+
+  startStandaloneServer(server, {
+    listen: { port },
+
+    context: async ({ req }) => {
+      const auth = req.headers.authorization
+      const currentUser = await getUserFromAuthHeader(auth)
+      return { currentUser }
+    },
+  }).then(({ url }) => {
+    console.log(`Server ready at ${url}`)
+  })
+}
+
+module.exports = startServer
+```
+The code we defined first extracts the token contained in the requests `Authorization` header. The helper function `getUserFromAuthHeader` decodes the token and loops up the corresponding user from the database. If the token is not valid or the user cannot be found, the function returns null.
+
+Finally, the context field `currentUser` is set to the user object corresnponding to the requester, or to null if no user was found.
+
+The context value is passed to resolvers as the `third` parameter. The resolver for the `me` query is very simple: it only returns the currently logged-in user, which it gets from the resolver parameter `context`, from the field `currentUser`:
+```javascript
+Query: {
+  // ...
+  me: (root, args, context) => {
+    return context.currentUser
+  }
+},
+```
+If the header contains a valid token, the query returns the details of the user identified by the token.
+
+# Friends list
+
+We can complete the applications backend so that adding and editing persons require logging in, and added persons are automatically added to the friends list of the user. We can first remove all persons not in anyones friends list from the database. `addPerson` mutation changes like so:
+```javascript
+Mutation: {
+
+  addPerson: async (root, args, context) => {
+    const currentUser = context.currentUser
+ 
+    if (!currentUser) {
+      throw new GraphQLError('not authenticated', {
+        extensions: {
+          code: 'UNAUTHENTICATED',
+        }
+      })
+    }
+
+    const nameExists = await Person.exists({ name: args.name })
+
+    if (nameExists) {
+      throw new GraphQLError(`Name must be unique: ${args.name}`, {
+        extensions: {
+          code: 'BAD_USER_INPUT',
+          invalidArgs: args.name,
+        },
+      })
+    }
+
+    const person = new Person({ ...args })
+
+    try {
+      await person.save()
+
+      currentUser.friends = currentUser.friends.concat(person)
+      await currentUser.save()
+    } catch (error) {
+      throw new GraphQLError(`Saving person failed: ${error.message}`, {
+        extensions: {
+          code: 'BAD_USER_INPUT',
+          invalidArgs: args.name,
+          error
+        }
+      })
+    }
+
+    return person
+  },
+  //...
+}
+```
+If a logged-in user cannot be found from the context, an `GraphQLError` with a proper message is thrown. Creating new persons is now done with `async/await` syntax, because if the operation is successful, the created person is added to the friends list of the user.
+
+We can alos add the ability to add a person to your own friends list. The mutation schema is as follows:
+```javascript
+type Mutation {
+  // ...
+  addAsFriend(name: String!): User
+}
+```
+And the mutations resolver:
+```javascript
+  addAsFriend: async (root, args, { currentUser }) => {
+    if (!currentUser) {
+      throw new GraphQLError('not authenticated', {
+        extensions: { code: 'UNAUTHENTICATED' },
+      })
+    }
+
+    const nonFriendAlready = (person) =>
+      !currentUser.friends
+        .map((f) => f._id.toString())
+        .includes(person._id.toString())
+
+    const person = await Person.findOne({ name: args.name })
+
+    if (!person) {
+      throw new GraphQLError("The name didn't found", {
+        extensions: {
+          code: 'BAD_USER_INPUT',
+          invalidArgs: args.name,
+        },
+      })
+    }
+
+    if (nonFriendAlready(person)) {
+      currentUser.friends = currentUser.friends.concat(person)
+    }
+
+    await currentUser.save()
+
+    return currentUser
+  },
+```
+The following query now returns the users friends list:
+```javascript
+query {
+  me {
+    username
+    friends{
+      name
+      phone
+    }
+  }
+}
+```

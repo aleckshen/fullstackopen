@@ -10,6 +10,8 @@ const Authors = (props) => {
     refetchQueries: [{ query: ALL_AUTHORS }]
   })
 
+  const result = useQuery(ALL_AUTHORS)
+
   if (!props.show) {
     return null
   }
@@ -22,8 +24,6 @@ const Authors = (props) => {
     setName('')
     setBorn('')
   }
-
-  const result = useQuery(ALL_AUTHORS)
 
   if (result.loading) {
     return <div>loading...</div>
