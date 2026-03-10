@@ -1,5 +1,8 @@
+const { GraphQLError } = require('graphql')
+const jwt = require('jsonwebtoken')
 const Book = require('./models/book')
 const Author = require('./models/author')
+const User = require('./models/user')
 
 const resolvers = {
   Query: {
@@ -24,7 +27,10 @@ const resolvers = {
 
       return Book.find(query).populate('author')
     },
-    allAuthors: async () => Author.find({})
+    allAuthors: async () => Author.find({}),
+    me: (root, args, context) => {
+      return context.currentUser
+    },
   },
 
   Author: {
@@ -34,32 +40,107 @@ const resolvers = {
   },
 
   Mutation: {
-    addBook: async (root, args) => {
-      let author = await Author.findOne({ name: args.author })
+    addBook: async (root, args, context) => {
+      const currentUser = context.currentUser
 
-      if (!author) {
-        author = new Author({ name: args.author })
-        await author.save()
+      if (!currentUser) {
+        throw new GraphQLError('not authenticated', {
+          extensions: {
+            code: 'UNAUTHENTICATED'
+          }
+        })
       }
 
-      const book = new Book({ ...args, author: author._id })
-      await book.save()
+      try {
+        let author = await Author.findOne({ name: args.author })
 
-      return book.populate('author')
+        if (!author) {
+          author = new Author({ name: args.author })
+          await author.save()
+        }
+
+        const book = new Book({ ...args, author: author._id })
+
+        await book.save()
+        return book.populate('author')
+      } catch (error) {
+        throw new GraphQLError(error.message, {
+          extensions: {
+            code: 'BAD_USER_INPUT',
+            invalidArgs: args,
+            error
+          }
+        })
+      }
     },
 
-    editAuthor: async (root, args) => {
-      const author = await Author.findOne({ name: args.name })
+    editAuthor: async (root, args, context) => {
+      const currentUser = context.currentUser
 
-      if (!author) {
-        return null
+      if (!currentUser) {
+        throw new GraphQLError('not authenticated', {
+          extensions: {
+            code: 'UNAUTHENTICATED'
+          }
+        })
       }
 
-      author.born = args.setBornTo
-      await author.save()
+      try {
+        const author = await Author.findOne({ name: args.name })
 
-      return author
-    }
+        if (!author) {
+          return null
+        }
+
+        author.born = args.setBornTo
+        await author.save()
+
+        return author
+      } catch (error) {
+        throw new GraphQLError(error.message, {
+          extensions: {
+            code: 'BAD_USER_INPUT',
+            invalidArgs: args,
+            error
+          }
+        })
+      }
+    },
+    createUser: async (root, args) => {
+      const user = new User({
+        username: args.username,
+        favoriteGenre: args.favoriteGenre
+      })
+
+      return user.save()
+        .catch(error => {
+          throw new GraphQLError(`Creating the user failed ${error.message}`, {
+            extensions: {
+              code: 'BAD_USER_INPUT',
+              invalidArgs: args.username,
+              error
+            }
+          })
+        })
+    },
+    login: async (root, args) => {
+      const user = await User.findOne({ username: args.username })
+
+      if (!user || args.password !== 'secret') {
+        throw new GraphQLError('wrong credentials', {
+          extensions: {
+            code: 'BAD_USER_INPUT',
+          }
+        })
+      }
+
+      const userForToken = {
+        username: user.username,
+        id: user._id
+      }
+
+      return { value: jwt.sign(userForToken, process.env.JWT_SECRET) }
+    },
   }
 }
 
