@@ -1484,3 +1484,208 @@ query {
   }
 }
 ```
+
+# User login
+
+We need to ensure that we can log in since our actions need to be authenticated in order to make actions such as creating a new people. We can first define the user mutation for loggin in at `src/queries.js`:
+```javascript
+export const LOGIN = gql`
+  mutation login($username: String!, $password: String!) {
+    login(username: $username, password: $password)  {
+      value
+    }
+  }
+```
+We will then define the `LoginForm` component responsible for logging in in the file `src/components/LoginForm.jsx`.
+```javascript
+import { useState } from 'react'
+import { useMutation } from '@apollo/client/react'
+import { LOGIN } from '../queries'
+
+const LoginForm = ({ setError, setToken }) => {
+  const [username, setUsername] = useState('')
+  const [password, setPassword] = useState('')
+
+  const [ login ] = useMutation(LOGIN, {
+    onCompleted: (data) => {
+      const token = data.login.value
+      setToken(token)
+      localStorage.setItem('phonebook-user-token', token)
+    },
+    onError: (error) => {
+      setError(error.message)
+    }
+  })
+
+  const submit = (event) => {
+    event.preventDefault()
+    login({ variables: { username, password } })
+  }
+// .....
+```
+The component receives the functions `setError` and `setToken` as props, which can be used to change the application state. Defining state management is left to the `App` component. For the `useMutation` function that performs the login, an `onCompleted` callback function is defined.
+
+In the app component we will initialize the token with:
+```javascript
+const [token, setToken] = useState(localStorage.getItem('phonebook-user-token'))
+```
+And also have the following check:
+```javascript
+if (!token) {
+    return (
+      <div>
+        <Notify errorMessage={errorMessage} />
+        <h2>Login</h2>
+        <LoginForm
+          setToken={setToken}
+          setError={notify}
+        />
+      </div>
+    )
+  }
+
+```
+The token is now initalized from a token value that may be found in local storage. This was the token is also restored when the page is reloaded, and the user stays logged in. If local storage does not contain a value for the key `phone-book-user`, the token value will be `null`.
+
+We will also add a button that allows a logged-in user to log out. In the buttons click handler, we set token to null, remove the token from local stoarge, and reset the apollo client cache:
+```javascript
+import { useApolloClient, useQuery } from '@apollo/client/react'
+// ...
+const client = useApolloClient()
+// ...
+const onLogout = () => {
+    setToken(null)
+    localStorage.clear()
+    client.resetStore()
+  }
+//...
+<button onClick={onLogout}>logout</button>
+```
+Resetting the cache is done using the apollo `client` objects `resetStore` method, and the client itself can be accessed with the `useApolloClient` hook. Clearing the cache is important, because some queires may have fetched data into the cache that only an authenticated user is allowed to access.
+
+# Adding a token header
+
+After the backend changes, creating new persons require that a valid user token is sent with the request. This requires changes to the apollo client configuration in the `main.jsx` file.
+```javascript
+import { StrictMode } from 'react'
+import { createRoot } from 'react-dom/client'
+import App from './App.jsx'
+
+import { ApolloClient, HttpLink, InMemoryCache } from '@apollo/client'
+import { ApolloProvider } from '@apollo/client/react'
+
+import { SetContextLink } from '@apollo/client/link/context'
+
+
+const authLink  = new SetContextLink(({ headers }) => {
+  const token = localStorage.getItem('phonebook-user-token')
+  return {
+    headers: {
+      ...headers,
+      authorization: token ? `Bearer ${token}` : null,
+    }
+  }
+})
+
+
+const httpLink = new HttpLink({ uri: 'http://localhost:4000' })
+
+
+const client = new ApolloClient({
+  cache: new InMemoryCache(),
+  link: authLink.concat(httpLink)
+})
+
+createRoot(document.getElementById('root')).render(
+  <StrictMode>
+    <ApolloProvider client={client}>
+      <App />
+    </ApolloProvider>
+  </StrictMode>,
+)
+```
+As before, the server URL is wrapped using the HttpLink constructor to create a suitable `httpLink` object. This time, however, it is modified using the `context` defined y the `authLink` object so that, for each request, the authorizaiton header is set to the token that may be stored in local storage. Creating new persons and changing numbers work again.
+
+# Fixing validation
+
+In the application, it should be possible to add a person without a phone number. However currently it doesn't work. Validation fails because frontend sends an empty string as the value of `phone`. Lets change the function creating new persons so that it sets `phone` to `undefined` if user has not given a value:
+```javascript
+ createPerson({
+      variables: {
+        name,
+        street,
+        city,
+        phone: phone.length > 0 ? phone : undefined,
+      },
+    })
+```
+From the perspective of the backend and the database, the `phone` attribute now has no value if the user leaves the field empty. Adding a person without a phone number works again.
+
+There is also an issue with the functionality for changing a phone number. The database validations require that the phone number must be at least 5 characters long, but if we try to update an existing persons phone number to one that is too short, nothing seems to happen. The persons phone number is not updated, but on the other hand no error message is shown either.
+
+We can modify the application so that validation errors are also shwon when changing a phone number:
+```javascript
+const PhoneForm = ({ setError }) => {
+  // ...
+
+  const submit = async (event) => {
+    event.preventDefault()
+
+    try {
+      await changeNumber({ variables: { name, phone } })
+    } catch (error) {
+      setError(error.message)
+    }
+
+    setName('')
+    setPhone('')
+  }
+
+  // ...
+}
+```
+The request that updates the number, `changeNumber`, is now executed inside a `try` block. If the database validations fail, execution ends up in a catch block, where an appropriate error message is set in the application using the `setErrror` function.
+
+# Updating cache, revisited
+
+We have to update the cache of the apollo client on creating new persons. We can update it using the mutations `refetchQueries` option to define that the `ALL_PERSONS` query is done again.
+```javascript
+const PersonForm = ({ setError }) => {
+  // ...
+
+  const [createPerson] = useMutation(CREATE_PERSON, {
+    onError: (error) => setError(error.message),
+
+    refetchQueries: [{ query: ALL_PERSONS }],
+  })
+
+// ...
+}
+```
+This approach is pretty good, the drawback being that the qeury is always rerun with any updates. It is possible to optimize the solution by updating the cache manually. This is done by defining ab appropriate update callback for the mutations instead of using the `refetchQueries` attribute. Apollo executes this callback after mutation completes:
+```javascript
+const PersonForm = ({ setError }) => {
+  // ...
+
+  const [createPerson] = useMutation(CREATE_PERSON, {
+    onError: (error) => setError(error.message),
+
+    update: (cache, response) => {
+      cache.updateQuery({ query: ALL_PERSONS }, ({ allPersons }) => {
+        return {
+          allPersons: allPersons.concat(response.data.addPerson),
+        }
+      })
+    },
+  })
+ 
+  // ..
+}
+```
+The callback function is given a reference to the cache and the data returned by the mutation as parameters. For example, in our case, this would be the created person.
+
+Using the function `updateQuery` the code updates the query `ALL_PERSONS` in the cache by adding the new person to the cached data. In some situations, the only sensible way to keep the cache up to date is using the `update` callback.
+
+When necessary, it is possible to disable cache for the whole application or single queries by setting the field managing the use of cache, `fetchPolicy` as `no-cache`. 
+
+Be diligent with the cache. Old data in the cache can cause hard to find bugs. As we know, keeping the cache up to date is very challenging.
