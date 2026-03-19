@@ -1,5 +1,9 @@
 import { gql } from '@apollo/client'
-import { useApolloClient, useQuery } from '@apollo/client/react'
+import {
+  useApolloClient,
+  useQuery,
+  useSubscription,
+} from '@apollo/client/react'
 import { useState } from 'react'
 
 import Persons from './components/Persons'
@@ -8,21 +12,22 @@ import Notify from './components/Notify'
 import PhoneForm from './components/PhoneForm'
 import LoginForm from './components/LoginForm'
 
-const ALL_PERSONS = gql`
-  query {
-    allPersons {
-      name
-      phone
-      id
-    }
-  }
-`
+import { ALL_PERSONS, PERSON_ADDED } from './queries'
+import { addPersonToCache } from './utils/apolloCache'
 
 const App = () => {
   const [token, setToken] = useState(localStorage.getItem('phonebook-user-token'))
   const [errorMessage, setErrorMessage] = useState(null)
   const result = useQuery(ALL_PERSONS)
   const client = useApolloClient()
+
+  useSubscription(PERSON_ADDED, {
+    onData: ({ data }) => {
+      const addedPerson = data.data.personAdded
+      notify(`${addedPerson.name} added`)
+      addPersonToCache(client.cache, addedPerson)
+    },
+  })
 
   if (result.loading) {
     return <div>loading...</div>

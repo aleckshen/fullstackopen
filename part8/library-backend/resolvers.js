@@ -1,8 +1,11 @@
 const { GraphQLError } = require('graphql')
+const { PubSub } = require('graphql-subscriptions')
 const jwt = require('jsonwebtoken')
 const Book = require('./models/book')
 const Author = require('./models/author')
 const User = require('./models/user')
+
+const pubsub = new PubSub()
 
 const resolvers = {
   Query: {
@@ -27,15 +30,31 @@ const resolvers = {
 
       return Book.find(query).populate('author')
     },
-    allAuthors: async () => Author.find({}),
+    allAuthors: async () => {
+      // Solve n+1: fetch all books once and compute counts in memory
+      const authors = await Author.find({})
+      const books = await Book.find({}, 'author')
+
+      const bookCountMap = {}
+      books.forEach(book => {
+        const id = book.author.toString()
+        bookCountMap[id] = (bookCountMap[id] || 0) + 1
+      })
+
+      return authors.map(author => ({
+        ...author.toObject({ virtuals: true }),
+        bookCount: bookCountMap[author._id.toString()] || 0,
+      }))
+    },
     me: (root, args, context) => {
       return context.currentUser
     },
   },
 
   Author: {
-    bookCount: async (root) => {
-      return Book.countDocuments({ author: root._id })
+    bookCount: (root) => {
+      // Use precomputed value from allAuthors; fall back to 0
+      return root.bookCount ?? 0
     }
   },
 
@@ -62,7 +81,11 @@ const resolvers = {
         const book = new Book({ ...args, author: author._id })
 
         await book.save()
-        return book.populate('author')
+        const populatedBook = await book.populate('author')
+
+        pubsub.publish('BOOK_ADDED', { bookAdded: populatedBook })
+
+        return populatedBook
       } catch (error) {
         throw new GraphQLError(error.message, {
           extensions: {
@@ -141,7 +164,13 @@ const resolvers = {
 
       return { value: jwt.sign(userForToken, process.env.JWT_SECRET) }
     },
-  }
+  },
+
+  Subscription: {
+    bookAdded: {
+      subscribe: () => pubsub.asyncIterableIterator('BOOK_ADDED')
+    },
+  },
 }
 
-module.exports = resolvers 
+module.exports = resolvers

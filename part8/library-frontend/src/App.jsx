@@ -1,15 +1,30 @@
 import { useState } from 'react'
-import { useApolloClient } from '@apollo/client/react'
+import { useApolloClient, useSubscription } from '@apollo/client/react'
 import Authors from './components/Authors'
 import Books from './components/Books'
 import NewBook from './components/NewBook'
 import LoginForm from './components/LoginForm'
 import Recommend from './components/Recommend'
+import { ALL_BOOKS, BOOK_ADDED } from './queries'
 
 const App = () => {
   const [page, setPage] = useState('authors')
   const [token, setToken] = useState(localStorage.getItem('library-user-token'))
   const client = useApolloClient()
+
+  useSubscription(BOOK_ADDED, {
+    onData: ({ data }) => {
+      const addedBook = data.data.bookAdded
+      window.alert(`New book added: "${addedBook.title}" by ${addedBook.author.name}`)
+
+      client.cache.updateQuery({ query: ALL_BOOKS }, (existing) => {
+        if (!existing) return existing
+        const alreadyExists = existing.allBooks.some(b => b.id === addedBook.id)
+        if (alreadyExists) return existing
+        return { allBooks: existing.allBooks.concat(addedBook) }
+      })
+    },
+  })
 
   const logout = () => {
     setToken(null)

@@ -41,7 +41,7 @@ const typeDefs = `
     ): Book!
     editAuthor(
       name: String!
-      setBornTo: Int! 
+      setBornTo: Int!
     ): Author
     createUser(
       username: String!
@@ -51,6 +51,10 @@ const typeDefs = `
       username: String!
       password: String!
     ): Token
+  }
+
+  type Subscription {
+    bookAdded: Book!
   }
 `
 
