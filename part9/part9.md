@@ -151,3 +151,35 @@ This means that the return value should be an object with two properties `value1
 We can define arrays in typescript in two following ways:
 1. `let values: number[];`
 2. `let values: Array<number>;`
+
+# Any type
+
+The type `any` specifies that a variable can be of any type. It disables type checking when you use this keyword. In typescript, every untyped variable whose type cannot be inferred implicitly becomes of type `any`. We can either explicitly define the `any` type, or it is implicitly inferred. However implicitly inferring types are considered problematic since it is often due to the coder not specifying any types. If we configure the rule `noImplicitAny` on the compiler level, then we can avoid this issue.
+
+# Type assertion
+
+Type assertion is another way to keep the typescript compiler and eslint quiet. For example we can export the type Operation in `calculator.ts`:
+```typescript
+export type Operation = 'multiply' | 'add' | 'divide';
+```
+Now we can import the type and use the type assertion as to tell the typescript compiler what type a variable has:
+```typescript
+import { calculator, Operation } from './calculator';
+
+app.post('/calculate', (req, res) => {
+  // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+  const { value1, value2, op } = req.body;
+
+  // validate the data here
+
+  // assert the type
+
+  const operation = op as Operation;
+
+
+  const result = calculator(Number(value1), Number(value2), operation);
+
+  return res.send({ result });
+});
+```
+The defined constant operation has no the type Operation and the compiler is perfectly happy, no quieting of the eslint rule is needed on the following function call. Using a type assertion (or quieting in eslint rule) is always risky. It leaves the typescript compiler off the hook, the compiler just trusts that we as developers know what we are doing. If the asserted tpye does not have the right kind of value, the result will be a runtime error, so one must be careful when validating the data if a type assertion is used.
