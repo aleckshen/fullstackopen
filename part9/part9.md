@@ -183,3 +183,20 @@ app.post('/calculate', (req, res) => {
 });
 ```
 The defined constant operation has no the type Operation and the compiler is perfectly happy, no quieting of the eslint rule is needed on the following function call. Using a type assertion (or quieting in eslint rule) is always risky. It leaves the typescript compiler off the hook, the compiler just trusts that we as developers know what we are doing. If the asserted tpye does not have the right kind of value, the result will be a runtime error, so one must be careful when validating the data if a type assertion is used.
+
+# Setting up a typescript project
+
+Instead of using `ts-node` to run every typescript file, we can use typescripts built in compiler. After installing typescript as a dev dependency, we can use typscripts native compiler (tsc), we will add this to our `package.json` file (unless we have typescript installed globally):
+```
+{
+  // ..
+  "scripts": {
+
+    "tsc": "tsc"
+  },
+  // ..
+}
+```
+We can intialize our `tsconfig.json` settings by running:
+`npm run rsc -- --init`
+Note that arguments before `--` are interpreted as being for the `npm` command, while the ones after are meant for the command that is run through the script.
