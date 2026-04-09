@@ -151,5 +151,3 @@ This means that the return value should be an object with two properties `value1
 We can define arrays in typescript in two following ways:
 1. `let values: number[];`
 2. `let values: Array<number>;`
-
-# More about tsconfig
