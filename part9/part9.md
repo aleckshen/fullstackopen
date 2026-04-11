@@ -200,3 +200,31 @@ Instead of using `ts-node` to run every typescript file, we can use typescripts 
 We can intialize our `tsconfig.json` settings by running:
 `npm run rsc -- --init`
 Note that arguments before `--` are interpreted as being for the `npm` command, while the ones after are meant for the command that is run through the script.
+
+# Utility types
+
+If we want to use a specific modification of a type we can use the utility type Pick. For example:
+```typescript
+interface Todo {
+  title: string;
+  description: string;
+  completed: boolean;
+}
+ 
+type TodoPreview = Pick<Todo, "title" | "completed">;
+ 
+const todo: TodoPreview = {
+  title: "Clean room",
+  completed: false,
+};
+```
+If we want to only exclude one field, it would be better to use the Omit utility type, which we can declare which fields to exclude:
+```typescript
+const getNonSensitiveEntries = (): Omit<DiaryEntry, 'comment'>[] => {
+  // ...
+}
+```
+To improve readability we should define a type alias `NonSensitiveDiaryEntry` in the file `types.ts`:
+```typescript
+export type NonSensitiveDiaryEntry = Omit<DiaryEntry, 'comment'>;
+```
