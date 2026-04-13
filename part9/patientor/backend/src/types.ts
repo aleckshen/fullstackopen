@@ -9,8 +9,15 @@ export interface Patient {
   name: string,
   ssn: string,
   dateOfBirth: string,
-  gender: string,
+  gender: Gender,
   occupation: string
 }
 
+export enum Gender {
+  Male = 'male',
+  Female = 'female',
+  Other = 'other'
+}
+
 export type NonSensitivePatients = Omit<Patient, 'ssn'>
+export type NewPatient = Omit<Patient, 'id'>
