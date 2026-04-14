@@ -228,3 +228,46 @@ To improve readability we should define a type alias `NonSensitiveDiaryEntry` in
 ```typescript
 export type NonSensitiveDiaryEntry = Omit<DiaryEntry, 'comment'>;
 ```
+
+# Schema validation libraries
+
+Writting validators to the request body can be really tedious. There are several schema validator libraries that can help. A library that helps with schema validation is zod. We can install this using `npm install zod`.
+
+An example of using zod is converting the parsers of the primitive valued fields such as:
+```typescript
+const isString = (text: unknown): text is string => {
+  return typeof text === 'string' || text instanceof String;
+};
+
+const parseComment = (comment: unknown): string => {
+  if (!isString(comment)) {
+    throw new Error('Incorrect comment');
+  }
+
+  return comment;
+};
+```
+To replace them with:
+```typescript
+const parseComment = (comment: unknown): string => {
+  return z.string().parse(comment);
+};
+```
+First the string method of zod is used to define the required type (or schema in zod terms). After that the value (which is of type unknown) is parsed with the method parse, which returns the value in the required type or throws an exception. We dont actually need the `parseComment` helper function anymore and can just parse directly using the zod function.
+```typescript
+comment: z.string().parse(object.comment)
+```
+
+Instead of parsing each field indiviudally we can also just create a zod object schema and use that to parse the entire object:
+```typescript
+const newEntrySchema = z.object({
+  weather: z.nativeEnum(Weather),
+  visibility: z.nativeEnum(Visibility),
+  date: z.string().date(),
+  comment: z.string().optional()
+});
+
+export const toNewDiaryEntry = (object: unknown): NewDiaryEntry => {
+  return newEntrySchema.parse(object);
+};
+```
